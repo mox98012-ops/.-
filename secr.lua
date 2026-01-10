@@ -7,7 +7,9 @@ end
 if getgenv().serenium_LOADED then
 	return
 end
-
+game:GetService("Players").LocalPlayer:WaitForChild("CharacterLoaded");
+game:GetService("Players").LocalPlayer:WaitForChild("DataLoadedClient");
+game:GetService("Players").LocalPlayer:WaitForChild("DataLoaded");
 getgenv().serenium_LOADED = true
 
 if not LPH_OBFUSCATED then
