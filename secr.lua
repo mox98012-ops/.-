@@ -6083,7 +6083,7 @@ Create(PlayersRegion, "Button", {
 			if script_key then
 				queue_on_teleport(([[
 					script_key = "%s";
-					loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/27c298c7ffc93c7c51701af33be4f84f.lua"))();
+					loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/1d70bcc7b77c737b834b1bfadd10fa12.lua"))();
 				]]):format(script_key))
 			end
 
@@ -6105,7 +6105,7 @@ Create(PlayersRegion, "Button", {
 					if script_key then
 						queue_on_teleport(([[
 							script_key = "%s";
-							loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/27c298c7ffc93c7c51701af33be4f84f.lua"))();
+							loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/1d70bcc7b77c737b834b1bfadd10fa12.lua"))();
 						]]):format(script_key))
 					end
 
@@ -6128,7 +6128,7 @@ Create(PlayersRegion, "Button", {
 				if script_key then
 					queue_on_teleport(([[
 						script_key = "%s";
-						loadstring(game:HttpGet("https://api.luarmor.net/files/v3/loaders/27c298c7ffc93c7c51701af33be4f84f.lua"))();
+						loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/1d70bcc7b77c737b834b1bfadd10fa12.lua"))();
 					]]):format(script_key))
 				end
 
