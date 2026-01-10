@@ -136,16 +136,8 @@ end
 local Changelogs = [[Happy new years, serenium.hvh User.
 %NEWBULLET%
 New things:
-[~] Reworked Attempt Fling
-[~] Fixed Fake Position
-%NEWBULLET%
-Fixes:
-[!] Mitigated FPS issues
-%NEWBULLET%
-DISCLAIMER
-MEOW/10 and MEOW/11 bans are caused by
-killstreak detection and not by the script.
-To avoid them, do not exceed 9 KDR.
+[~] fps fully fixed
+[~] game now fully waits to load before running
 %NEWBULLET%
 ]]
 
