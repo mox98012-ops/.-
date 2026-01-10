@@ -1,8 +1,5 @@
 --!nocheck
 --!optimize 2
-game:GetService("Players").LocalPlayer:WaitForChild("DataLoadedClient");
-game:GetService("Players").LocalPlayer:WaitForChild("DataLoaded");
-game:GetService("Players").LocalPlayer:WaitForChild("CharacterLoaded");
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
@@ -14,10 +11,6 @@ end
 getgenv().serenium_LOADED = true
 
 if not LPH_OBFUSCATED then
-	LPH_JIT_MAX = function(...)
-		return ...
-	end
-
 	LPH_NO_UPVALUES = function(...)
 		return ...
 	end
@@ -140,11 +133,19 @@ if not Data then
 	}
 end
 
-local Changelogs = [[Greetings, serenium.hvh User.
+local Changelogs = [[Happy new years, serenium.hvh User.
 %NEWBULLET%
 New things:
-[~] fps fully fixed
-[~] game now properly waits to load
+[~] Reworked Attempt Fling
+[~] Fixed Fake Position
+%NEWBULLET%
+Fixes:
+[!] Mitigated FPS issues
+%NEWBULLET%
+DISCLAIMER
+MEOW/10 and MEOW/11 bans are caused by
+killstreak detection and not by the script.
+To avoid them, do not exceed 9 KDR.
 %NEWBULLET%
 ]]
 
@@ -173,7 +174,7 @@ s.Ended:Connect(function()
 end)
 
 --// VARIABLES (from old script) dont mind this shitty ahh habit from my old
-local ReGui = loadstring(get("https://raw.githubusercontent.com/hookop/regui/refs/heads/main/Main.luau"))()
+local ReGui = loadstring(get("https://raw.githubusercontent.com/hookop/regui/refs/heads/main/Main.luau"))();
 local EffectHolder = game:GetObjects("rbxassetid://17192721766")[1]
 local Prefabs = game:GetObjects("rbxassetid://" .. ReGui.PrefabsId)[1]
 
@@ -1161,7 +1162,22 @@ end
 function Framework:GetSessionData(Player)
 	return Modules.Name["DataHandler"].getSessionDataRoduxStoreForPlayer(Player or LocalPlayer)
 end
-
+local CachedPlayers = {}
+local function UpdateCachedPlayers()
+	CachedPlayers = {}
+	for _, v in Players.GetPlayers(Players) do
+		if v ~= LocalPlayer then
+			table.insert(CachedPlayers, v)
+		end
+	end
+end
+UpdateCachedPlayers()
+Players.PlayerAdded:Connect(function()
+	UpdateCachedPlayers()
+end)
+Players.PlayerRemoving:Connect(function()
+	UpdateCachedPlayers()
+end)
 function Framework:GetClosest(Distance, Priority, CheckFunction)
 	local function n(Player)
 		if
@@ -1579,7 +1595,7 @@ function Framework:WaitForDescendant(Root, Name, Condition, Timeout)
 	end)
 
 	repeat
-		local Instance: boolean = Root:FindFirstChild(Name, true)
+		local Instance = Root:FindFirstChild(Name, true)
 		if Instance and Condition(Instance) then
 			Descendant = Instance
 			break
@@ -2260,7 +2276,6 @@ local Character = CreateTab("Character", "rbxassetid://81489458260315", UDim2.ne
 local Visuals = CreateTab("Visuals", "rbxassetid://7300480952", UDim2.new(0, 0, 0, 0))
 local Misc = CreateTab("Misc", "rbxassetid://7734042071", UDim2.new(0, 0, 1.3, 0))
 local Sniper = CreateTab("Sniper", "rbxassetid://92157041036177", UDim2.new(0, 0, 1.05, 0))
-local MorphsTab = CreateTab("Morphs", "rbxassetid://4344974639", UDim2.new(0, 0, 1.05, 0))
 local Settings = CreateTab("Settings", "rbxassetid://7300486042", UDim2.new(0, 0, 0, 0))
 
 SelectorObject.Body.CanvasSize = UDim2.new(0, 0, 1.175, 0)
@@ -3200,14 +3215,73 @@ do --// Others
 
 
   CharModifications2:Separator({ Text = "Others" })
-	Create(
-		CharModifications2,
-		"Checkbox",
-		{ Label = "Fake Position", Value = false },
-		"fakeposition",
-		"fakes your position",
-		true
-	)
+Create(
+	CharModifications2,
+	"Checkbox",
+	{
+		Label = "Fake Position",
+		Value = false,
+		Callback = function(self, bool)
+			local runService = game:GetService("RunService")
+
+			local getHumanoidRootPart = function()
+				local character = LocalPlayer.Character
+				return character and character:FindFirstChild("HumanoidRootPart")
+			end
+
+			local function startFakePosition()
+				if getgenv().connection then
+					getgenv().connection:Disconnect()
+					getgenv().connection = nil
+				end
+
+				if not getHumanoidRootPart() then
+					return
+				end
+
+				task.spawn(function()
+					setfflag("NextGenReplicatorEnabledWrite4", "true")
+					
+					getgenv().connection = runService.Heartbeat:Connect(function()
+						local root = getHumanoidRootPart()
+						if root then
+							root.AssemblyLinearVelocity = root.AssemblyLinearVelocity + Vector3.new(0, 0.01, 0)
+						end
+					end)
+				end)
+			end
+
+			if not bool then
+				if getgenv().connection then
+					getgenv().connection:Disconnect()
+					getgenv().connection = nil
+				end
+				if getgenv().characterAddedConnection then
+					getgenv().characterAddedConnection:Disconnect()
+					getgenv().characterAddedConnection = nil
+				end
+				setfflag("NextGenReplicatorEnabledWrite4", "false")
+				return
+			end
+
+			startFakePosition()
+			
+			if getgenv().characterAddedConnection then
+				getgenv().characterAddedConnection:Disconnect()
+			end
+			
+			getgenv().characterAddedConnection = LocalPlayer.CharacterAdded:Connect(function()
+				task.wait(0.5)
+				if getHumanoidRootPart() then
+					startFakePosition()
+				end
+			end)
+		end
+	},
+	"fakeposition",
+	"fakes your position",
+	true
+)
 	Create(
 		CharModifications2,
 		"Checkbox",
@@ -3251,13 +3325,6 @@ do --// Others
 		end
 	end)
 end
-task.spawn(function()
-	if Classes.fakeposition.Value then
-		setfflag("NextGenReplicatorEnabledWrite4", "true")
-	else
-		setfflag("NextGenReplicatorEnabledWrite4", "false")
-	end
-end)
 --// Ranged Tab
 local AimbotSection = CreateRegion(Ranged, "Aimbot")
 do --// Aimbot
@@ -3941,7 +4008,7 @@ Create(ESPSection, "SliderProgress",
 		Distance.ZIndex = 1
 	end
 
-	RunService.RenderStepped:Connect(LPH_JIT_MAX(function()
+	RunService.RenderStepped:Connect(function()
 		for i, v in pairs(UtilityDrawings) do
 			if not v then
 				continue
@@ -4180,7 +4247,7 @@ Create(ESPSection, "SliderProgress",
 				end
 			end
 		end
-	end))
+	end)
 end
 
 local LightingSection = CreateRegion(Visuals, "Lighting")
@@ -4682,7 +4749,7 @@ do
 		end
 	end
 
-	function RunModCheck(Player: Player | nil)
+	function RunModCheck(Player)
 		if Player then
 			CheckPlayer(Player)
 		else
@@ -5111,8 +5178,7 @@ Create(Section, "Checkbox", {
 			end)
 			local ScrollerFrame = PlayerScrollList.SizeOffsetFrame.ScrollingFrameContainer.ScrollingFrameClippingFrame
 
-			Framework:BindToRenderStep(
-				LPH_JIT_MAX(function()
+			Framework:BindToRenderStep(function()
 					if Classes.HidePlayerNames.Value and Classes.StreamerMode.Value then
 						for i, v in pairs(ScrollerFrame:GetChildren()) do
 							if not listNames[v] then
@@ -5181,9 +5247,7 @@ Create(Section, "Checkbox", {
 							end
 						end
 					end
-				end),
-				nil,
-				Enum.RenderPriority.Last
+				end
 			)
 
 			local fakeCharacter = Instance.new("Model")
@@ -5216,8 +5280,8 @@ Create(Section, "Checkbox", {
 				end
 			end
 		end
-	end)
-
+	end
+	)
 	local old = Modules.Name["RoduxStore"].store.dispatch
 	Modules.Name["RoduxStore"].store.dispatch = function(table, sigma)
 		if typeof(sigma) == "table" then
@@ -5484,12 +5548,12 @@ do
     Text = "Attempt Fling",
     Callback = function()
         local realName = m(Classes.PlayersTable.Value)
-        local target = Players:FindFirstChild(realName)
+        local target = Players.FindFirstChild(Players,realName)
         if not target or not target.Character then return end
 
         local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
         local localChar = LocalPlayer.Character
-        local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+        local localRoot = localChar and localChar.FindFirstChild(localChar,"HumanoidRootPart")
         if not targetRoot or not localRoot then return end
 
         local AttachRoot = targetRoot
@@ -5498,7 +5562,7 @@ do
         local heartbeatConn
         heartbeatConn = RunService.Heartbeat:Connect(function()
             if not walkFlingActive then
-                heartbeatConn:Disconnect()
+                heartbeatConn.Disconnect(                heartbeatConn)
                 return
             end
             if localChar and localChar.Parent and localRoot and localRoot.Parent then
@@ -5828,6 +5892,89 @@ Create(PlayersRegion, "Button", {
 			end
 		end,
 	}, "LoopKillAll", "Loop kill all using Attempt Kill", true)
+	Create(PlayersRegion, "Checkbox", {
+	Label = "Loop Attempt Fling All",
+	Value = false,
+	Callback = function(self, bool)
+		if bool then
+
+			if Framework.InMenu(Framework,LocalPlayer) then
+				repeat task.wait() until not Framework.InMenu(Framework,LocalPlayer)
+			end
+
+			task.wait(0.05)
+			CanFlingAll = true
+
+			task.spawn(function()
+				while CanFlingAll do
+
+					if Framework.InMenu(Framework,LocalPlayer) then
+						repeat task.wait() until not Framework.InMenu(Framework,LocalPlayer)
+					end
+
+					local Character = LocalPlayer.Character
+					local LocalRoot = Character and Character.FindFirstChild(Character,"HumanoidRootPart")
+
+					if not LocalRoot then
+						task.wait(0.1)
+						continue
+					end
+					
+					local playerCount = 0
+					for i = 1, #CachedPlayers do
+						local Player = CachedPlayers[i]
+						if not Player or not Player.Parent then continue end
+						if not CanFlingAll then break end
+						if Framework.InMenu(Framework,Player) then continue end
+
+						local Char = Player.Character
+						local TargetRoot = Char and Char.FindFirstChild(Char,"HumanoidRootPart")
+						if TargetRoot then
+							local targetPos = TargetRoot.Position
+							
+							if targetPos.Y > 280 then
+								continue
+							end
+
+							local distanceFromCenter = (targetPos * Vector3.new(1, 0, 1)).Magnitude
+							if distanceFromCenter > 1200 then
+								continue
+							end
+
+							playerCount = playerCount + 1
+							local movel = 0.1
+							local startTime = tick()
+
+							while CanFlingAll and tick() - startTime < 0.15 do
+								if Framework.InMenu(Framework,Player) then break end
+								if not LocalRoot.Parent or not TargetRoot.Parent then break end
+
+								LocalRoot.CFrame = TargetRoot.CFrame
+								sethiddenproperty(LocalRoot, "PhysicsRepRootPart", TargetRoot)
+
+								local vel = LocalRoot.Velocity
+								LocalRoot.Velocity = vel * 150000 + Vector3.new(0, 150000, 0)
+
+								RunService.RenderStepped:Wait()
+
+								LocalRoot.Velocity = vel + Vector3.new(0, movel, 0)
+								movel = -movel
+
+								RunService.Heartbeat:Wait()
+							end
+						end
+					end
+					
+					if playerCount == 0 then
+						task.wait(0.5)
+					end
+				end
+			end)
+		else
+			CanFlingAll = false
+		end
+	end,
+}, "LoopAttemptFlingAll", "Loop fling all using Attempt Fling", true)
 	Create(
 		PlayersRegion,
 		"Checkbox",
@@ -6780,111 +6927,8 @@ Create(PlayerSniperRegion, "Button", {
 }, "JoinPlayerButton", "attempts to join target server")
 SniperStatusLabel.Text = "status: nil"
 
-do
-	Create(MorphsTab, "Checkbox", {
-		Label = "Enable spin",
-		Value = MorphsData.State.SpinEnabled,
-		Callback = function(self, bool)
-			MorphsData.State.SpinEnabled = bool
-		end,
-	}, "MorphSpinCheckbox", "Spins the morph mesh")
-
-	Create(MorphsTab, "Combo", {
-		Label = "Morphs",
-		Selected = MorphsData.State.Name,
-		Items = MorphsData.Names,
-		SizeX = 0.9,
-		Callback = function(self, value)
-			MorphsData.State.Name = value
-		end,
-	}, "MorphDropdown", "Choose a morph", false, false, false, Color3.fromRGB(87, 112, 255))
-
-	Create(MorphsTab, "Combo", {
-		Label = "Morph Material",
-		Selected = MorphsData.State.Material,
-		Items = MorphsData.Materials,
-		SizeX = 0.9,
-		Callback = function(self, value)
-			MorphsData.State.Material = value
-		end,
-	}, "MorphMaterialDropdown", "Choose the material for the morph", false, false, false, Color3.fromRGB(87, 112, 255))
-
-	Create(MorphsTab, "SliderProgress", {
-		Label = "Morph Offset X",
-		Value = MorphsData.State.OffsetX,
-		Minimum = -5,
-		Maximum = 5,
-		Format = "%.2f",
-		SizeX = 0.95,
-		Callback = function(self, val)
-			MorphsData.State.OffsetX = val
-		end,
-	}, "MorphOffsetXSlider", "Adjust morph X position")
-
-	Create(MorphsTab, "SliderProgress", {
-		Label = "Morph Offset Y",
-		Value = MorphsData.State.OffsetY,
-		Minimum = -5,
-		Maximum = 5,
-		Format = "%.2f",
-		SizeX = 0.95,
-		Callback = function(self, val)
-			MorphsData.State.OffsetY = val
-		end,
-	}, "MorphOffsetYSlider", "Adjust morph Y position")
-
-	Create(MorphsTab, "SliderProgress", {
-		Label = "Morph Offset Z",
-		Value = MorphsData.State.OffsetZ,
-		Minimum = -5,
-		Maximum = 5,
-		Format = "%.2f",
-		SizeX = 0.95,
-		Callback = function(self, val)
-			MorphsData.State.OffsetZ = val
-		end,
-	}, "MorphOffsetZSlider", "Adjust morph Z position")
-
-	Create(MorphsTab, "SliderProgress", {
-		Label = "Morph Rotation X",
-		Value = MorphsData.State.RotationX,
-		Minimum = -180,
-		Maximum = 180,
-		Format = "%.0f",
-		SizeX = 0.95,
-		Callback = function(self, val)
-			MorphsData.State.RotationX = val
-		end,
-	}, "MorphRotationXSlider", "Adjust morph rotation X")
-
-	Create(MorphsTab, "SliderProgress", {
-		Label = "Morph Rotation Y",
-		Value = MorphsData.State.RotationY,
-		Minimum = -180,
-		Maximum = 180,
-		Format = "%.0f",
-		SizeX = 0.95,
-		Callback = function(self, val)
-			MorphsData.State.RotationY = val
-		end,
-	}, "MorphRotationYSlider", "Adjust morph rotation Y")
-
-	Create(MorphsTab, "SliderProgress", {
-		Label = "Morph Rotation Z",
-		Value = MorphsData.State.RotationZ,
-		Minimum = -180,
-		Maximum = 180,
-		Format = "%.0f",
-		SizeX = 0.95,
-		Callback = function(self, val)
-			MorphsData.State.RotationZ = val
-		end,
-	}, "MorphRotationZSlider", "Adjust morph rotation Z")
-end
-
 do --// Combat Section
-	Framework:BindToRenderStep(
-		LPH_JIT_MAX(function()
+	Framework:BindToRenderStep(function()
 			if Classes.KillAura.Value and not KADebounce then
 				local weapon, metadata = Framework:GetWeapon()
 				if weapon and metadata then
@@ -7019,9 +7063,7 @@ do --// Combat Section
 					end
 				end
 			end
-		end),
-		nil,
-		Enum.RenderPriority.First
+		end
 	)
 
 	local angle = 0
@@ -7135,8 +7177,7 @@ do --// Combat Section
 		end
 	end))
 
-	Framework:BindToRenderStep(
-		LPH_JIT_MAX(function()
+	Framework:BindToRenderStep(function()
 			if Classes.AutoStompShove.Value then
 				local Character = LocalPlayer.Character
 				local closest = Framework:GetClosest(Classes.StompShoveRange.Value, true)
@@ -7187,9 +7228,7 @@ do --// Combat Section
 					end
 				end
 			end
-		end),
-		nil,
-		Enum.RenderPriority.Character
+		end
 	)
 
 	task.spawn(LPH_NO_VIRTUALIZE(function()
@@ -7419,7 +7458,7 @@ do -- Silent Aim
 		local args = { ... }
 		local caster = args[1]
 
-		pcall(LPH_JIT_MAX(function()
+		pcall(function()
 			local weapon, metadata = Framework:GetRanged()
 
 			local Chance = Framework:Chance(Classes.HitChance.Value)
@@ -7540,7 +7579,7 @@ do -- Silent Aim
 					})
 				end
 			end
-		end))
+		end)
 
 		if caster and caster.UserData and caster.StateInfo then
 			return OldSimulateCast(...)
@@ -7648,7 +7687,7 @@ do -- Silent Aim
 		end
 	end))
 
-	task.spawn(LPH_JIT_MAX(function()
+	task.spawn(function()
 		while task.wait() do
 			if not Active then
 				break
@@ -7881,7 +7920,7 @@ do -- Silent Aim
 
 			metadata.canShootBulletssss = true
 		end
-	end))
+	end)
 
 	local Line = Drawing.new("Line")
 	Line.Color = Colors.ShowTargetSA or Color3.new(1, 1, 1)
@@ -8051,8 +8090,7 @@ do --// Combat Modifications
 			AgentCanJump = true,
 		})
 
-		Framework:BindToRenderStep(
-			LPH_JIT_MAX(function()
+		Framework:BindToRenderStep(function()
 				if LocalPlayer.Character then
 					local hitboxes = getHitboxes()
 					if hitboxes and next(hitboxes) and Classes.AlwaysHit.Value then
@@ -8108,9 +8146,7 @@ do --// Combat Modifications
 						table.clear(AlreadySet)
 					end
 				end
-			end),
-			nil,
-			Enum.RenderPriority.Character
+			end
 		)
 
 		RunService.Heartbeat:Connect(LPH_NO_VIRTUALIZE(function()
@@ -8140,8 +8176,7 @@ do --// Combat Modifications
 		end))
 
 		local Finished = true
-		Framework:BindToRenderStep(
-			LPH_JIT_MAX(function()
+		Framework:BindToRenderStep(function()
 				if Classes.Pathfind.Value then
 					if Finished and (not GrenadeNear or not OnTp or not ClaimingAirdrop) then
 						local Character = LocalPlayer.Character
@@ -8276,9 +8311,7 @@ do --// Combat Modifications
 						end
 					end
 				end
-			end),
-			nil,
-			Enum.RenderPriority.Last
+			end
 		)
 	end
 end
@@ -8410,8 +8443,7 @@ do --// Parry Things
 		return playSoundOld(sound)
 	end
 
-	Framework:BindToRenderStep(
-		LPH_JIT_MAX(function() -- I took this from my Balthazar script lol
+	Framework:BindToRenderStep(function() -- I took this from my Balthazar script lol
 			if not Classes.AutoParry.Value then
 				return
 			end
@@ -8495,9 +8527,7 @@ do --// Parry Things
 					end
 				end
 			end
-		end),
-		nil,
-		Enum.RenderPriority.First
+		end
 	)
 end
 
