@@ -3256,11 +3256,6 @@ mmisc:AddToggle("ShowLine", {
 	Title = "line color";
 	Transparency = 0;
 });
-mmisc:AddToggle('Killsay', {
-    Text = 'killsay',
-    Default = false,
-    Tooltip = 'cause annoyance on kill'
-})
 mmisc:AddToggle("antimod", {
     Text = "anti mod";
     Default = false;
