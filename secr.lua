@@ -252,7 +252,7 @@ getgenv().ar = false;
 getgenv().killaura = false;
 getgenv().autostompshove = false;
 getgenv().autoglory = false;
-getgenv().antimod = true;
+getgenv().antimod = false;
 getgenv().BeartrapEnemy = false;
 getgenv().AutoAttachC4 = false;
 getgenv().AutoDetonateC4 = false;
@@ -1318,47 +1318,90 @@ if Modules.RangedWeaponClient and Modules.RangedWeaponClient.updateIgnoreList th
     end
 end
 if Network and Network.FireServer then
-    local OldFireServer = Network.FireServer
-
-    Network.FireServer = function(self, remoteName, ...)
-        local args = {...}
-
-        if remoteName == "MeleeDamage" then
-            if Config.HitboxExpand
-                and args[2]
-                and args[2].Name == "FakeHitbox"
-                and args[2].Parent
-            then
-                local partName = Config.HBEPart
-                local parent = args[2].Parent
-
-                local targetPart =
-                    parent:FindFirstChild(
-                        partName == "Random"
-                            and R6BodyParts[math.random(#R6BodyParts)]
-                            or partName
-                    )
-                    or parent:FindFirstChild("Torso")
-
-                if targetPart then
-                    args[2] = targetPart
-
-                    local function rand()
-                        return math.random() * 2 - 1
-                    end
-
-                    args[5] = CFrame.new(
-                        rand() * (targetPart.Size.X / 2),
-                        rand() * (targetPart.Size.Y / 2),
-                        rand() * (targetPart.Size.Z / 2)
-                    )
-                end
-            end
-
-            return OldFireServer(self, remoteName, unpack(args))
-        end
-        return OldFireServer(self, remoteName, ...)
-    end
+	local OldFireServer = Network.FireServer
+	
+	Network.FireServer = function(self, remoteName, ...)
+		local args = {...}
+		
+		if remoteName == "MeleeDamage" then
+			if Config.HitboxExpand and args[2] and args[2].Name == "FakeHitbox" then
+				local part = args[2].Parent:FindFirstChild(
+					Config.HBEPart == "Random" and R6BodyParts[math.random(1, #R6BodyParts)] or Config.HBEPart
+				) or args[2].Parent:FindFirstChild("Torso")
+				
+				if part then
+					args[2] = part
+					args[5] = CFrame.new(
+						(math.random() * math.random(-1, 1)) * (part.Size.X / 2),
+						(math.random() * math.random(-1, 1)) * (part.Size.Y / 2),
+						(math.random() * math.random(-1, 1)) * (part.Size.Z / 2)
+					)
+				end
+			end
+		end
+		
+		if remoteName == "MeleeFinish" then
+			if Config.HitboxExpand and args[2] and args[2].Name == "FakeHitbox" then
+				local part = args[2].Parent:FindFirstChild(
+					Config.HBEPart == "Random" and R6BodyParts[math.random(1, #R6BodyParts)] or Config.HBEPart
+				) or args[2].Parent:FindFirstChild("Torso")
+				
+				if part then
+					args[2] = part
+				end
+			end
+		end
+		if remoteName == "RangedHit" then
+			if Config.HitboxExpand and args[2] and args[2].Name == "FakeHitbox" then
+				local part = args[2].Parent:FindFirstChild(
+					Config.HBEPart == "Random" and R6BodyParts[math.random(1, #R6BodyParts)] or Config.HBEPart
+				) or args[2].Parent:FindFirstChild("Torso")
+				
+				if part then
+					args[2] = part
+					args[4] = part.Position
+					args[5] = CFrame.Angles(args[5]:ToEulerAnglesYXZ()) * CFrame.new(
+						(math.random() * math.random(-1, 1)) * (part.Size.X / 2),
+						(math.random() * math.random(-1, 1)) * (part.Size.Y / 2),
+						(math.random() * math.random(-1, 1)) * (part.Size.Z / 2)
+					)
+				end
+			end
+			
+			if getgenv().AlwaysHead and args[2] and args[2].Parent then
+				local head = args[2].Parent:FindFirstChild("Head")
+				if head then
+					args[2] = head
+				end
+			end
+		end
+		if remoteName == "RangedExplode" then
+			if Config.HitboxExpand and args[2] and args[2].Name == "FakeHitbox" then
+				local part = args[2].Parent:FindFirstChild(
+					Config.HBEPart == "Random" and R6BodyParts[math.random(1, #R6BodyParts)] or Config.HBEPart
+				) or args[2].Parent:FindFirstChild("Torso")
+				
+				if part then
+					args[2] = part
+					args[4] = part.Position
+					args[5] = CFrame.Angles(args[5]:ToEulerAnglesYXZ()) * CFrame.new(
+						(math.random() * math.random(-1, 1)) * (part.Size.X / 2),
+						(math.random() * math.random(-1, 1)) * (part.Size.Y / 2),
+						(math.random() * math.random(-1, 1)) * (part.Size.Z / 2)
+					)
+				end
+			end
+			
+			if getgenv().AlwaysHead and args[2].Parent then
+				local head = args[2].Parent:FindFirstChild("Head")
+				if head then
+					args[2] = head
+				end
+			end
+		end
+		
+		return OldFireServer(self, remoteName, unpack(args))
+	end
 end
 
 -- Public API
@@ -1373,7 +1416,7 @@ getgenv().FakeHitbox = {
     SetPart    = function(p) Config.HBEPart      = tostring(p) end,
     
     Wallbang   = function(v) Config.Wallbang     = v and true or false end,
-    AlwaysHead = function(v) Config.AlwaysHead   = v and true or false end,
+    AlwaysHead = function(v) getgenv().AlwaysHead   = v and true or false end,
     
     GetConfig  = function() return table.clone(Config) end,
     GetHitboxes = function() return FakeHitboxes end,
@@ -1414,37 +1457,6 @@ do
 		end;
 		return oldfunc(...);
 	end);
-	framework:argmodify("RangedExplode", {}, function(n, ...)
-		local args = { ... }
-		local part = args[2]
-		if Config.HitboxExpand then
-			part = part.Parent:FindFirstChild(
-				Config.HBEPart == "Random" and R6BodyParts[math.random(1, #R6BodyParts)] or Config.HBEPart
-			) or args[2].Parent:FindFirstChild("Torso")
-		end
-
-		if Config.HitboxExpand then
-			if part then
-				return {
-					[2] = part,
-					[4] = part.Position,
-					--part.CFrame:ToObjectSpace(
-					[5] = CFrame.Angles(args[5]:ToEulerAnglesYXZ()) * CFrame.new(
-						(math.random() * math.random(-1, 1)) * (part.Size.X / 2),
-						(math.random() * math.random(-1, 1)) * (part.Size.Y / 2),
-						(math.random() * math.random(-1, 1)) * (part.Size.Z / 2)
-					),
-					--)
-				}
-			end
-		end
-
-		if getgenv().AlwaysHead then
-			return { [2] = args[2].Parent:FindFirstChild("Head") }
-		end
-
-		return
-	end)
 	framework:argmodify("RangedHit", {}, function(n, ...)
 		local args = { ... }
 		if Config.HitboxExpand and args[2].Name == "FakeHitbox" then
@@ -5764,7 +5776,7 @@ gunmods:AddToggle("AlwaysHead", {
 	Text = "always head";
 	Default = false;
 	Callback = function(v)
-		Config.AlwaysHead = v
+		getgenv().AlwaysHead = v
 		getgenv().AlwaysHead = v;
 	end;
 });
