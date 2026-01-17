@@ -258,6 +258,7 @@ getgenv().BeartrapEnemy = false;
 getgenv().AutoAttachC4 = false;
 getgenv().AutoDetonateC4 = false;
 getgenv().hbe = false;
+getgenv().voidenabled = false;
 getgenv().showhbe = false;
 getgenv().AlwaysHead = false;
 getgenv().ragebot = false;
@@ -267,6 +268,7 @@ getgenv().autoequip = false;
 getgenv().ndcd = false;
 getgenv().killsay = false;
 getgenv().nfd = false;
+getgenv().loopkilltarget = false;
 getgenv().hbe_part = "Head";
 getgenv().hbesize = 1;
 getgenv().stompshoverange = 10;
@@ -278,19 +280,16 @@ getgenv().flyspeed = 16;
 getgenv().teleport = function(CFrame)
 	game:GetService("TweenService"):Create(humanoidrootpart,TweenInfo.new(0),{ CFrame = CFrame }):Play();
 end;
-local Players = game:GetService("Players")
-local localplayer = Players.LocalPlayer
 local function whitelisted(player)
-    if not player then return false end
-    if table.find(whitelist, player.Name) then
-        return true;
-    end;
-    if Toggles.WhitelistFriends and Toggles.WhitelistFriends.Value then
-        return localplayer:IsFriendsWith(localplayer.UserId);
-    end;
-
-    return false;
-end;
+	if not player then return false end
+	if table.find(whitelist, player.Name) then
+		return true
+	end
+	if Toggles and Toggles.WhitelistFriends and Toggles.WhitelistFriends.Value then
+		return localplayer:IsFriendsWith(player.UserId)
+	end
+	return false
+end
 
 -- void hide
 getgenv().clientcframe = getgenv().clientcframe or { Connections = {}, History = {}; };
@@ -1063,23 +1062,36 @@ function revertranged(name)
 end;
 
 -- stamina
-framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function()
-    local stamina = modules.Name["DefaultStaminaHandlerClient"].getDefaultStamina();
-    if stamina then
-        if getgenv().infstamina then
-            stamina:setStamina(math.huge);
-        else
-            if stamina:getStamina() >= 10000 then
-                stamina:setStamina(modules.Name["DefaultStaminaConstants"].MAX_STAMINA);
-            end;
+local applied = false;
+local appliedmultiplier = nil;
+runservice.Heartbeat:Connect(LPH_NO_VIRTUALIZE(function()
+    local stamina = modules.Name.DefaultStaminaHandlerClient.getDefaultStamina();
+    if not stamina then return; end;
+    if not getgenv().infstamina then
+        if applied and appliedmultiplier then
+            stamina:removeMaxStaminaMultiplier(appliedmultiplier);
+            stamina:setStamina(stamina:getMaxStamina());
+            applied = false;
+            appliedmultiplier = nil;
         end;
+        return;
     end;
+    if not applied then
+        local constants = modules.Name.DefaultStaminaConstants;
+        local defaultMax = constants.MAX_STAMINA;
+        local multiplier = 1e6 / defaultMax;
+        stamina:addMaxStaminaMultiplier(multiplier);
+        appliedmultiplier = multiplier;
+        applied = true;
+    end;
+    stamina:setStamina(stamina:getMaxStamina());
 end));
+
 -- major toggles
-local Players = game:GetService("Players")
+local Players = players
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local LocalPlayer = Players.LocalPlayer
+local LocalPlayer = localplayer
 local Map = workspace:FindFirstChild("Map")
 local FakeHitboxes = {}
 getgenv().Config = getgenv().Config or {
@@ -2176,11 +2188,11 @@ for _, obj in pairs(getgc(true)) do
     end
 end;
 
--- local blacklist = {
---     "rbxassetid://106649093705106",
---     "rbxassetid://6423003415",
---     "rbxassetid://101463478179793",
--- };
+local blacklist = {
+    "rbxassetid://106649093705106",
+    "rbxassetid://6423003415",
+   "rbxassetid://101463478179793",
+};
 
 local HumanoidToParry = {};
 local ParryingCharacters = {};
@@ -2535,7 +2547,8 @@ if modules.Name["CharacterUtil"] and modules.Name["CharacterUtil"].getIsHittable
                 end
             end
             if not framework:Check(character) then
-                return
+				print("anti parry blocked hit on uncheckable character")
+				return
             end
         end
         return getIsHittableCharacterPartOld(part, unused)
@@ -2973,6 +2986,7 @@ exploit1:AddToggle("voidenabled", {
     Callback = function()
         UpdateFeature("voidenabled", "voidenabledkey", function(state)
             is_enabled = state
+			getgenv().voidenabled = state;
         end)
     end
 }):AddKeyPicker("voidenabledkey", {
@@ -3651,36 +3665,6 @@ misc1:AddButton("remove from whitelist", function()
         library:Notify(playername .. " is not whitelisted", 4);
     end;
 end);
-local CanKillAll = false;
-auto:AddToggle("loopkillall", {
-	Text = "loop attempt kill all";
-	Default = false;
-	Callback = function(Value)
-		getgenv().loopkillall = Value;
-		if Value then
-			if framework:InMenu(localplayer) then
-				repeat
-					task.wait();
-				until not framework:InMenu(localplayer);
-			end;
-			task.wait(0.1);
-			if not humanoidrootpart then
-				return;
-			end;
-			CanKillAll = false;
-			CanFireStartFallDamage = false;
-			humanoidrootpart.CFrame = humanoidrootpart.CFrame + Vector3.new(0, 1000, 0);
-			task.wait(0.2);
-			network:FireServer("StartFallDamage");
-			humanoidrootpart.CFrame = humanoidrootpart.CFrame + Vector3.new(0, -1000, 0);
-			CanKillAll = true;
-		else
-			CanFireStartFallDamage = true;
-			CanKillAll = false;
-		end;
-	end;
-});
-
 local Desync = false;
 local desyncThreadRef = nil;
 local function Jitter(rootPart)
@@ -3717,7 +3701,6 @@ end;
 local function StopJitter()
 	Desync = false;
 end;
-
 local function AttemptKillTarget(targetPlayer)
 	if not targetPlayer then
 		return;
@@ -3761,10 +3744,131 @@ local function AttemptKillTarget(targetPlayer)
 	AttachRoot = nil;
 	StopJitter();
 end;
+local loopkillthread = nil;
+local currentTarget = nil;
+auto:AddToggle("loopkilltarget", {
+    Text = "Loop attempt kill target";
+    Default = false;
+    Callback = function(Value)
+        getgenv().loopkilltarget = Value;
+        if not Value then
+            currentTarget = nil;
+            if loopkillthread then
+                task.cancel(loopkillthread);
+                loopkillthread = nil;
+            end;
+            return;
+        end;
+        if framework:InMenu(localplayer) then
+            repeat task.wait() until not framework:InMenu(localplayer);
+        end;
+		task.wait(0.1);
+		if not getgenv().falldamage then
+			local hrp = localplayer.Character and localplayer.Character:FindFirstChild("HumanoidRootPart");
+			if hrp then
+				hrp.CFrame = hrp.CFrame + Vector3.new(0, 1000, 0);
+				task.wait(0.2);
+				network:FireServer("StartFallDamage");
+				hrp.CFrame = hrp.CFrame + Vector3.new(0, -1000, 0);
+			end;
+		end;
+		getgenv().falldamage = true;
+        task.wait(0.1)
+        if loopkillthread then
+            task.cancel(loopkillthread);
+        end;
+        loopkillthread = task.spawn(LPH_NO_VIRTUALIZE(function()
+            while getgenv().loopkilltarget do
+                if framework:InMenu(localplayer) then
+                    task.wait(0.2);
+                    continue;
+                end;
+                local targetPlayer = SelectedPlayer;
+                if not targetPlayer
+                    or targetPlayer == localplayer then
+                    currentTarget = nil
+                    task.wait(0.2)
+                    continue
+                end
+                local targetChar = targetPlayer.Character
+                if not targetChar 
+                    or not targetChar:FindFirstChild("HumanoidRootPart") 
+                    or not targetChar:FindFirstChild("Humanoid") 
+                    or targetChar.Humanoid.Health <= 0 then
+                    currentTarget = nil
+                    task.wait(0.2)
+                    continue
+                end
+                if currentTarget ~= targetPlayer then
+                    currentTarget = targetPlayer
+                end
+                while getgenv().loopkilltarget
+                    and currentTarget == targetPlayer
+                    and targetChar.Parent
+                    and targetChar:FindFirstChild("Humanoid")
+                    and targetChar.Humanoid.Health > 0
+                    and not framework:InMenu(localplayer)
+                do
+                    local rootToUse = driver or humanoidrootpart
+                    local attachRoot = targetChar.HumanoidRootPart
+
+                    if rootToUse and attachRoot then
+                        rootToUse.CFrame = attachRoot.CFrame
+                        sethiddenproperty(rootToUse, "PhysicsRepRootPart", attachRoot)
+                    end
+
+                    AttemptKillTarget(targetPlayer)
+                    task.wait(0.05)
+                end
+                task.wait()
+            end
+            currentTarget = nil
+            loopkillthread = nil
+        end))
+    end,
+})
+runservice.Heartbeat:Connect(function()
+    if humanoidrootpart and currentTarget then
+        local targetChar = currentTarget.Character
+        if targetChar and targetChar:FindFirstChild("HumanoidRootPart") then
+            local rootToUse = driver or humanoidrootpart
+            local attachRoot = targetChar.HumanoidRootPart
+            rootToUse.CFrame = attachRoot.CFrame
+            sethiddenproperty(rootToUse, "PhysicsRepRootPart", attachRoot)
+        end
+    end
+end)
+local CanKillAll = false;
+auto:AddToggle("loopkillall", {
+	Text = "loop attempt kill all";
+	Default = false;
+	Callback = function(Value)
+		getgenv().loopkillall = Value;
+		if Value then
+			if framework:InMenu(localplayer) then
+				repeat
+					task.wait();
+				until not framework:InMenu(localplayer);
+			end;
+			task.wait(0.1);
+			if not humanoidrootpart then
+				return;
+			end;
+			CanKillAll = false;
+			CanFireStartFallDamage = false;
+			humanoidrootpart.CFrame = humanoidrootpart.CFrame + Vector3.new(0, 1000, 0);
+			task.wait(0.2);
+			network:FireServer("StartFallDamage");
+			humanoidrootpart.CFrame = humanoidrootpart.CFrame + Vector3.new(0, -1000, 0);
+			CanKillAll = true;
+		else
+			CanFireStartFallDamage = true;
+			CanKillAll = false;
+		end;
+	end;
+});
+
 local isAliveFlag = true;
-local function whitelisted(player)
-    return table.find(whitelist, player.Name) ~= nil;
-end;
 local function StartKillLoop(character)
 	local characterRoot = character:WaitForChild("HumanoidRootPart");
 	local characterHumanoid = character:WaitForChild("Humanoid");
@@ -5388,8 +5492,8 @@ local lockedTarget = nil
 local lastPlayerRefresh = 0
 local cachedPlayers = {}
 local lastKeybindState = false
-local Players = game:GetService("Players")
-local localPlayer = Players.LocalPlayer
+local Players = players
+local localPlayer = localplayer
 local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
 
 localPlayer.CharacterAdded:Connect(LPH_NO_VIRTUALIZE(function(char)
