@@ -3747,7 +3747,7 @@ end;
 local loopkillthread = nil;
 local currentTarget = nil;
 auto:AddToggle("loopkilltarget", {
-    Text = "Loop attempt kill target";
+    Text = "loop attempt kill target";
     Default = false;
     Callback = function(Value)
         getgenv().loopkilltarget = Value;
