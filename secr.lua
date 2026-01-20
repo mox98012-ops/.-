@@ -7,6 +7,8 @@ if not LPH_OBFUSCATED then
 	LPH_NO_UPVALUES = function(...) return ...; end;
 	LPH_NO_VIRTUALIZE = function(...) return ...; end;
     LPH_CRASH = function(...) return ...; end;
+    LPH_JIT = function(...) return ...; end;
+    LPH_JIT_MAX = function(...) return ...; end;
 end;
 game:GetService("Players").LocalPlayer:WaitForChild("CharacterLoaded");
 game:GetService("Players").LocalPlayer:WaitForChild("DataLoadedClient");
@@ -211,7 +213,10 @@ local character = localplayer.Character or localplayer.CharacterAdded:Wait();
 local humanoidrootpart = character:WaitForChild("HumanoidRootPart");
 local humanoid = character:WaitForChild("Humanoid");
 local workspace = game:GetService("Workspace");
-local PlayerCharacters = workspace:FindFirstChild("PlayerCharacters");
+local function GetPlayerCharacters()
+    return workspace:FindFirstChild("PlayerCharacters") or workspace:FindFirstChild("Characters") or workspace
+end
+local PlayerCharacters = GetPlayerCharacters()
 local ParryingCharacters = {};
 library.IgnoreWhileTyping = true;
 local spinspeed = 10;
@@ -221,8 +226,10 @@ local OnTp = false;
 local Active = true;
 local AttachRoot = nil;
 local Ignored = {};
-local ParryingCharacters = {};
+local R6BodyParts = {"Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"};
 
+local originalDashCooldown = nil;
+getgenv().antifling = false;
 --getgenv variables
 getgenv().infstamina = false;
 getgenv().canalwaysjump = false;
@@ -265,10 +272,13 @@ getgenv().ragebot = false;
 getgenv().fakeswing = false;
 getgenv().swingsound = false;
 getgenv().autoequip = false;
+getgenv().voidonparry = false;
 getgenv().ndcd = false;
 getgenv().killsay = false;
 getgenv().nfd = false;
 getgenv().loopkilltarget = false;
+getgenv().stick = false;
+getgenv().tpenemy = false;
 getgenv().hbe_part = "Head";
 getgenv().hbesize = 1;
 getgenv().stompshoverange = 10;
@@ -303,7 +313,7 @@ local primarypart = character:WaitForChild("HumanoidRootPart");
 local client_cframe = primarypart.CFrame;
 if not data.IndexHook then
     local __index; __index = hookmetamethod(game, "__index", newcclosure(LPH_NO_VIRTUALIZE(function(self, property)
-        if not checkcaller() and self == primarypart and property == "CFrame" and is_enabled then
+        if not checkcaller() and self == primarypart and property == "CFrame" and getgenv().voidenabled then
             return client_cframe;
         end;
         return __index(self, property);
@@ -330,7 +340,7 @@ table.insert(data.Connections, runservice.Heartbeat:Connect(LPH_NO_VIRTUALIZE(fu
     if not (primarypart and primarypart.Parent) then return; end;
     client_cframe = primarypart.CFrame;
     local humanoid = localplayer.Character:WaitForChild("Humanoid");
-    if is_enabled and isnetworkowner(primarypart) then
+    if getgenv().voidenabled and isnetworkowner(primarypart) then
         local target = targetcframe();
         primarypart.CFrame = target;
 		humanoid:ChangeState(Enum.HumanoidStateType.Freefall);
@@ -691,6 +701,7 @@ function framework:GetClosest(Distance, Priority, CheckFunction)
 
     return ClosestPlayers;
 end;
+
 function framework:GetClosest2(Distance, CheckFunction)
 	local function n(Player)
 		if
@@ -723,7 +734,8 @@ function framework:GetClosest2(Distance, CheckFunction)
 		if Toggles.WhitelistFriends.Value and localplayer:IsFriendsWith(v.UserId) then
 			continue;
 		end;
-		local HRP = v.Character.HumanoidRootPart;
+		local HRP = v.Character and v.Character:FindFirstChild("HumanoidRootPart");
+		if not HRP then continue end
 		local Magnitude = (HRP.Position - humanoidrootpart.Position).Magnitude;
 
 		if Magnitude < Distance then
@@ -771,7 +783,8 @@ function framework:GetClosestToMouse(Distance, Priority, CheckFunction)
 			continue;
 		end;
 
-		local HRP = v.Character.HumanoidRootPart;
+		local HRP = v.Character and v.Character:FindFirstChild("HumanoidRootPart");
+		if not HRP then continue end
 		local vector, onScreen = camera:WorldToScreenPoint(HRP.Position);
 		if onScreen then
 			local Magnitude = (MousePosition - Vector2.new(vector.X, vector.Y)).Magnitude;
@@ -825,25 +838,41 @@ function framework:GetPointTeamPoint(Gamemode)
 end;
 
 function framework:GetClosestCharacterToOrigin(Origin, Dist)
-	local dis = math.huge;
-	local target = nil;
-
-	for i, v in pairs(PlayerCharacters:GetChildren()) do
+	local folder = GetPlayerCharacters()
+	for i, v in pairs(folder:GetChildren()) do
 		local Player = players:GetPlayerFromCharacter(v);
-		if Player and not whitelisted(Player) then
-			if table.find(Ignored, v.Name) then
-				continue;
-			end;
-		end;
-		if Toggles.WhitelistFriends.Value and localplayer:IsFriendsWith(v.UserId) then
+		-- Skip if not a real player's character (filters out fake characters)
+		if not Player then
 			continue;
 		end;
-		if v ~= character and v:FindFirstChild("HumanoidRootPart") then
-			local magnitude = (v.HumanoidRootPart.Position - Origin).Magnitude;
-			if magnitude < Dist then
-				dis = magnitude;
-				target = v;
-			end;
+		-- Skip if player is whitelisted
+		if whitelisted(Player) then
+			continue;
+		end;
+		-- Skip if in ignored list
+		if table.find(Ignored, v.Name) then
+			continue;
+		end;
+		-- Skip if friends whitelist is enabled and player is a friend
+		if Toggles.WhitelistFriends.Value and localplayer:IsFriendsWith(Player.UserId) then
+			continue;
+		end;
+		-- Skip own character
+		if v == character then
+			continue;
+		end;
+		-- Validate character has required parts
+		local hrp = v:FindFirstChild("HumanoidRootPart");
+		local head = v:FindFirstChild("Head");
+		local humanoid = v:FindFirstChildOfClass("Humanoid");
+		if not hrp or not head or not humanoid or humanoid.Health <= 0 then
+			continue;
+		end;
+		-- Calculate distance
+		local magnitude = (hrp.Position - Origin).Magnitude;
+		if magnitude < Dist then
+			dis = magnitude;
+			target = v;
 		end;
 	end;
 
@@ -852,21 +881,40 @@ end;
 
 function framework:GetClosestCharactersToOrigin(Origin, Dist)
 	local closests = {};
-	for i, v in pairs(PlayerCharacters:GetChildren()) do
+	local folder = GetPlayerCharacters()
+	for i, v in pairs(folder:GetChildren()) do
 		local Player = players:GetPlayerFromCharacter(v);
-		if Player and not whitelisted(Player) then
-			if table.find(Ignored, v.Name) then
-				continue;
-			end;
-		end;
-		if Toggles.WhitelistFriends.Value and localplayer:IsFriendsWith(v.UserId) then
+		-- Skip if not a real player's character (filters out fake characters)
+		if not Player then
 			continue;
 		end;
-		if v ~= character and v:FindFirstChild("HumanoidRootPart") then
-			local magnitude = (v.HumanoidRootPart.Position - Origin).Magnitude;
-			if magnitude < Dist then
-				table.insert(closests, v);
-			end;
+		-- Skip if player is whitelisted
+		if whitelisted(Player) then
+			continue;
+		end;
+		-- Skip if in ignored list
+		if table.find(Ignored, v.Name) then
+			continue;
+		end;
+		-- Skip if friends whitelist is enabled and player is a friend
+		if Toggles.WhitelistFriends.Value and localplayer:IsFriendsWith(Player.UserId) then
+			continue;
+		end;
+		-- Skip own character
+		if v == character then
+			continue;
+		end;
+		-- Validate character has required parts
+		local hrp = v:FindFirstChild("HumanoidRootPart");
+		local head = v:FindFirstChild("Head");
+		local humanoid = v:FindFirstChildOfClass("Humanoid");
+		if not hrp or not head or not humanoid or humanoid.Health <= 0 then
+			continue;
+		end;
+		-- Calculate distance
+		local magnitude = (hrp.Position - Origin).Magnitude;
+		if magnitude < Dist then
+			table.insert(closests, v);
 		end;
 	end;
 	return closests;
@@ -946,10 +994,13 @@ function framework:Teleport(CF)
 	end;
 end;
 
+local activeRenderSteps = {}
 function framework:BindToRenderStep(toBind, delayTime, priority: Enum.RenderPriority)
+    local name = httpservice:GenerateGUID(false)
+    table.insert(activeRenderSteps, name)
 	local isDelayed = false;
 	runservice:BindToRenderStep(
-		httpservice:GenerateGUID(true),
+		name,
 		(priority and priority or Enum.RenderPriority.First).Value,
 		delayTime
 			and function()
@@ -963,7 +1014,14 @@ function framework:BindToRenderStep(toBind, delayTime, priority: Enum.RenderPrio
 			end
 			or toBind
 	);
+    return name
 end;
+function framework:UnbindAll()
+    for _, name in ipairs(activeRenderSteps) do
+        pcall(function() runservice:UnbindFromRenderStep(name) end)
+    end
+    activeRenderSteps = {}
+end
 function framework:InMenu(Player)
 	local IsMenu = true;
 	local Player = Player or localplayer
@@ -1007,7 +1065,7 @@ function framework:Check(Character)
 		end;
 	end;
 
-	return;
+	return true;
 end;
 function framework:WaitForDescendant(Root, Name, Condition, Timeout)
 	local Descendant = nil;
@@ -1303,7 +1361,7 @@ if network and network.FireServer then
 				end
 			end
 			
-			if getgenv().AlwaysHead and args[2].Parent then
+			if getgenv().AlwaysHead and args[2] and args[2].Parent then
 				local head = args[2].Parent:FindFirstChild("Head")
 				if head then
 					args[2] = head
@@ -1485,6 +1543,32 @@ do
 	store.dispatch = function(table, sigma, ...)
 		if typeof(sigma) == "table" then
 			if sigma.type == "PARRY_IS_PARRIED_CHANGE" or sigma.type == "PARRY_IS_KNEELED_CHANGE" then
+				if getgenv().voidonparry and (tick() - (getgenv().last_void_parry or 0) > 3) then
+					getgenv().last_void_parry = tick();
+					task.spawn(function()
+						pcall(function()
+							if Toggles.voidenabled.Value and Options.voidenabledkey:GetState() then
+								getgenv().voidenabled = true;
+							else
+								local old = getgenv().voidenabled;
+								getgenv().void_lock = true;
+								getgenv().voidenabled = true;
+								task.spawn(function()
+									while getgenv().void_lock do
+										getgenv().voidenabled = true;
+										task.wait();
+									end;
+								end);
+								task.delay(2, function()
+									getgenv().void_lock = false;
+									if not (Toggles.voidenabled.Value and Options.voidenabledkey:GetState()) then
+										getgenv().voidenabled = old;
+									end;
+								end);
+							end;
+						end);
+					end);
+				end;
 				if getgenv().nps then
 					local JumpPower = modules.Name["JumpHandlerClient"];
 					local Walkspeed = modules.Name["WalkSpeedHandlerClient"];
@@ -1649,11 +1733,6 @@ function antimod(Player)
 		end;
 	end;
 end;
-runservice.Heartbeat:Connect(LPH_NO_VIRTUALIZE(function()
-	if getgenv().antimod then
-		antimod();
-	end;
-end));
 framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function() -- auto stomp
         if getgenv().autostompshove then
             local character = localplayer.Character
@@ -1687,16 +1766,17 @@ framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function() -- auto stomp
                                     metadata:slash()
                                     setthreadidentity(8)
 
-                                    local humanoid = targetPlayer.Character.Humanoid
-                                    local head = targetPlayer.Character.Head
-
-                                    v.OnHit:Fire(head, humanoid, {
-                                        Distance = 1,
-                                        Instance = head,
-                                        Material = Enum.Material.SmoothPlastic,
-                                        Position = head.Position,
-                                        Normal = Vector3.yAxis,
-                                    }, head.Position, head.Position)
+                                    local head = targetPlayer.Character:FindFirstChild("Head")
+                                    local targetHumanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+                                    if head and targetHumanoid then
+                                        v.OnHit:Fire(head, targetHumanoid, {
+                                            Distance = 1,
+                                            Instance = head,
+                                            Material = Enum.Material.SmoothPlastic,
+                                            Position = head.Position,
+                                            Normal = Vector3.yAxis,
+                                        }, head.Position, head.Position)
+                                    end;
                                 end
                             end
                             break
@@ -1776,9 +1856,41 @@ main:AddToggle("PlayAnimation", {
 	Text = "play animation";
 	Default = false;
 });
-main:AddToggle("TPEnemy", {
-	Text = "tp to enemy";
+main:AddToggle("tpenemy", {
+	Text = "strafe enemy";
 	Default = false;
+    Callback = function()
+        UpdateFeature("tpenemy", "tpenemybind", function(state)
+            getgenv().tpenemy = state;
+        end);
+    end;
+}):AddKeyPicker("tpenemybind", {
+	Text = "strafe enemy";
+	Default = "";
+	NoUi = true;
+    Callback = function()
+        UpdateFeature("tpenemy", "tpenemybind", function(state)
+            getgenv().tpenemy = state;
+        end);
+    end;
+});
+main:AddToggle("stick", {
+	Text = "stick to enemy";
+	Default = false;
+	Callback = function()
+		UpdateFeature("stick", "stickbind", function(state)
+			getgenv().stick = state;
+		end);
+	end;
+}):AddKeyPicker("stickbind", {
+	Text = "stick to enemy";
+	Default = "";
+	NoUi = true;
+	Callback = function()
+		UpdateFeature("stick", "stickbind", function(state)
+			getgenv().stick = state;
+		end);
+	end;
 });
 main:AddDropdown("TPType", {
 	Values = {"Behind", "Orbit", "Above", "Below", "Attach", "Random"};
@@ -1794,40 +1906,74 @@ main:AddSlider("TPRange", {
 	Rounding = 0;
 	Compact = true;
 });
-local Classes = {
-	KillAura = Toggles.KillAura,
-	KillAuraRange = Options.KillAuraRange,
-	KillAuraType = Options.KillAuraType,
-	PlayAnimation = Toggles.PlayAnimation,
-	TPEnemy = Toggles.TPEnemy,
-	TPType = Options.TPType,
-	TPRange = Options.TPRange,
-};
+local Classes = setmetatable({}, {
+	__index = function(t, k)
+		return Toggles[k] or Options[k]
+	end
+})
 
 -- Helper function
 local function waitUntilTimeout(signal, timeout)
 	if not signal then
 		return "Signal creation failed";
 	end;
-	local start = tick();
-	local success, result = pcall(function()
-		return signal:Wait();
-	end);
-	if not success then
-		return "Wait failed";
-	end;
-	if tick() - start > timeout then
-		return "Timed out";
-	end;
-	return result;
+	local result = nil
+    local timedOut = false
+    local connection
+    
+    connection = signal:Connect(function(...)
+        result = {...}
+        connection:Disconnect()
+    end)
+
+    task.delay(timeout, function()
+        if connection.Connected then
+            timedOut = true
+            connection:Disconnect()
+        end
+    end)
+
+    repeat task.wait() until result or timedOut
+    
+    if timedOut then return "Timed out" end
+	return unpack(result);
 end;
+local function gethitpart(character)
+	local head = character:FindFirstChild("Head");
+	if head then
+		return head;
+	end;
+	for _, inst in ipairs(character:GetChildren()) do
+		if inst:IsA("BasePart") then
+			return inst;
+		end;
+	end;
+	return character:FindFirstChild("HumanoidRootPart");
+end;
+function meleehitboxes(metadata)
+    if not metadata then return nil end
+    local success, result
+    local retries = 0
+    repeat
+        success, result = pcall(function()
+            return metadata.meleeHitboxes;
+        end)
+        if not success or result == nil then
+            task.wait(0.05);
+            retries = retries + 1
+        end
+    until (success and result) or retries > 10
+
+    return result;
+end
 -- Combat Section
 framework:BindToRenderStep(function()
-    if getgenv().killaura and not KADebounce then
-        local weapon, metadata = framework:GetWeapon();
-        if weapon and metadata then
-            local closest = framework:GetClosest(Classes.KillAuraRange.Value, true);
-            if closest and next(closest) then
+	if getgenv().killaura and not KADebounce then
+		local weapon, metadata = framework:GetWeapon();
+		local hitboxes = meleehitboxes(metadata);
+		if weapon and metadata then
+			local closest = framework:GetClosest(Classes.KillAuraRange.Value, true);
+			if closest and next(closest) then
                 local onCooldown = metadata._cooldownProgressTimer:getValue() < 0.75;
                 if not onCooldown then
                     KADebounce = true;
@@ -1839,58 +1985,62 @@ framework:BindToRenderStep(function()
                         metadata._lastSlashTick = tick();
                         weapon:SetAttribute("LastSlashTick", metadata._lastSlashTick);
                         task.wait(0.1);
-                        for i, v in metadata.meleeHitboxes do
-                            for playername, health in closest do
-                                local targetPlayer = players:FindFirstChild(playername);
-                                if
-                                    targetPlayer
-                                    and targetPlayer.Character
-                                    and targetPlayer.Character:FindFirstChild("Head")
-                                    and health ~= 0
-                                    and framework:Check(targetPlayer.Character)
-                                then
-                                    if table.find(whitelist, playername) then
-                                        continue
-                                    end
+						for i, v in hitboxes do
+							for playername, health in closest do
+								local targetPlayer = players:FindFirstChild(playername);
+								if
+									targetPlayer
+									and targetPlayer.Character
+									and health ~= 0
+									and framework:Check(targetPlayer.Character)
+								then
 
-                                    local character = targetPlayer.Character;
-                                    local session = framework:GetSessionData(targetPlayer);
-                                    if session and not session:getState().parry.isParrying then
-                                        local data = metadata._humanoidsAlreadyHit[character];
-                                        if not data then
-                                            metadata._humanoidsAlreadyHit[character] = {
-                                                ["hitDetectionStage"] = 0,
-                                                ["amountOfTimesHit"] = 0,
-                                                ["lastHitTick"] = 0,
-                                            };
-                                            data = metadata._humanoidsAlreadyHit[character];
-                                        end;
-                                        network:FireServer(
-                                            "MeleeDamage",
-                                            weapon,
-                                            character.Head,
-                                            i,
-                                            character.Head.Position,
-                                            character.Head.CFrame:ToObjectSpace(
-                                                CFrame.new(character.Head.Position)
-                                            ),
-                                            metadata._character.HumanoidRootPart.CFrame.LookVector,
-                                            (character.Head.Position - character.Head.Position).Unit,
-                                            Vector3.yAxis,
-                                            tick() - metadata._lastSlashTick
-                                        );
-                                        data.hitDetectionStage = metadata.hitDetectionStage or 1;
-                                        data.amountOfTimesHit += 1;
-                                        data.lastHitTick = tick();
-                                        if Classes.KillAuraType.Value == "single person" then
-                                            break;
-                                        end;
-                                    end;
-                                end;
-                            end;
-                            break;
-                        end;
-                        KADebounce = false;
+									local character = targetPlayer.Character;
+									local hitpart = gethitpart(character);
+									local root = character:FindFirstChild("HumanoidRootPart");
+									local session = framework:GetSessionData(targetPlayer);
+
+									if hitpart and root and session and not session:getState().parry.isParrying then
+										local data = metadata._humanoidsAlreadyHit[character];
+										if not data then
+											metadata._humanoidsAlreadyHit[character] = {
+												["hitDetectionStage"] = 0,
+												["amountOfTimesHit"] = 0,
+												["lastHitTick"] = 0,
+											};
+											data = metadata._humanoidsAlreadyHit[character];
+										end;
+
+										local myHRP = metadata._character:FindFirstChild("HumanoidRootPart");
+										if myHRP then
+											network:FireServer(
+												"MeleeDamage",
+												weapon,
+												hitpart,
+												i,
+												hitpart.Position,
+												hitpart.CFrame:ToObjectSpace(
+													CFrame.new(hitpart.Position)
+												),
+												myHRP.CFrame.LookVector,
+												(hitpart.Position - hitpart.Position).Unit,
+												Vector3.yAxis,
+												tick() - metadata._lastSlashTick
+											);
+										end;
+										data.hitDetectionStage = metadata.hitDetectionStage or 1;
+										data.amountOfTimesHit += 1;
+										data.lastHitTick = tick();
+
+										if Classes.KillAuraType.Value == "single person" then
+											break;
+										end;
+									end;
+								end;
+							end;
+							break;
+						end;
+						KADebounce = false;
                     else
                         if metadata:getShouldSlash() then
                             metadata._activateSignal:Fire();
@@ -1922,13 +2072,17 @@ framework:BindToRenderStep(function()
                                                 local character = targetPlayer.Character;
                                                 local data = framework:GetSessionData(targetPlayer);
                                                 if data and not data:getState().parry.isParrying then
-                                                    v.OnHit:Fire(character.Head, character.Humanoid, {
-                                                        Distance = 1,
-                                                        Instance = character.Head,
-                                                        Material = Enum.Material.SmoothPlastic,
-                                                        Position = character.Head.Position,
-                                                        Normal = Vector3.yAxis,
-                                                    }, character.Head.Position, character.Head.Position);
+                                                    local head = character:FindFirstChild("Head")
+                                                    local targetHum = character:FindFirstChildOfClass("Humanoid")
+                                                    if head and targetHum then
+                                                        v.OnHit:Fire(head, targetHum, {
+                                                            Distance = 1,
+                                                            Instance = head,
+                                                            Material = Enum.Material.SmoothPlastic,
+                                                            Position = head.Position,
+                                                            Normal = Vector3.yAxis,
+                                                        }, head.Position, head.Position);
+                                                    end;
                                                     if Classes.KillAuraType.Value == "single person" then
                                                         break;
                                                     end;
@@ -1963,13 +2117,14 @@ framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function()
 			
 			if TargetPlayer and TargetPlayer.Character and TargetPlayer.Character:FindFirstChild("HumanoidRootPart") then
 				if getgenv().BeartrapEnemy and CurrentTool and CurrentTool.Name == "Bear Trap" then
-					pcall(function()
-						network:InvokeServer(
-							"PlaceBearTrap",
-							CurrentTool,
-							TargetPlayer.Character.HumanoidRootPart.CFrame * CFrame.new(0, -1, 0)
-						);
-					end);
+						local targetHRP = TargetPlayer.Character:FindFirstChild("HumanoidRootPart")
+						if targetHRP then
+							network:InvokeServer(
+								"PlaceBearTrap",
+								CurrentTool,
+								targetHRP.CFrame * CFrame.new(0, -1, 0)
+							);
+						end;
 				end;
 				
 				if getgenv().AutoAttachC4 and CurrentTool and CurrentTool.Name == "C4" then
@@ -2000,6 +2155,7 @@ end));
 local angle = 0;
 local orbitCF = CFrame.new();
 local Connection;
+local StickTarget;
 Connection = runservice.Heartbeat:Connect(LPH_NO_VIRTUALIZE(function(dt)
 	if not Active then
 		Connection:Disconnect();
@@ -2008,97 +2164,135 @@ Connection = runservice.Heartbeat:Connect(LPH_NO_VIRTUALIZE(function(dt)
 	angle = (angle + dt * 10) % (2 * math.pi);
 	orbitCF = CFrame.new(math.cos(angle) * Classes.TPRange.Value, 0, math.sin(angle) * Classes.TPRange.Value);
 end));
-
 runservice.Heartbeat:Connect(LPH_NO_VIRTUALIZE(function()
-    local Type = Classes.TPType.Value;
-    local Character = localplayer.Character;
-    if Character then
-        local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart");
-        if HumanoidRootPart then
-            local weapon = framework:GetWeapon() or framework:GetRanged();
-            local CameraSubject;
-            if Character:GetAttribute("CameraSubject") then
-                CameraSubject = Character:FindFirstChild(Character:GetAttribute("CameraSubject"));
-            else
-                CameraSubject = Character:FindFirstChildOfClass("Humanoid") or HumanoidRootPart;
-            end;
-            if weapon and getgenv().killaura then
-                if not Classes.TPEnemy.Value then
-                    return;
-                end;
-                local closest = framework:GetClosest(Classes.KillAuraRange.Value, true);
-                if next(closest) then
-                    OnTp = false;
-                    local targetPlayer = players:FindFirstChild(next(closest));
-                    if
-                        targetPlayer
-                        and targetPlayer.Character
-                        and targetPlayer.Character:FindFirstChild("Head")
-                    then
-                        if table.find(whitelist, targetPlayer.Name) then
-                            return
-                        end
+	local Type = Classes.TPType.Value;
+	local Character = localplayer.Character;
+	if not Character then
+		return;
+	end;
 
-                        OnTp = true;
-                        HumanoidRootPart.Velocity = Vector3.zero;
-                        HumanoidRootPart.RotVelocity = Vector3.zero;
-                        sethiddenproperty(
-                            HumanoidRootPart,
-                            "PhysicsRepRootPart",
-                            targetPlayer.Character.HumanoidRootPart
-                        );
-                        if Type == "Behind" then
-                            local lookVector = -targetPlayer.Character.HumanoidRootPart.CFrame.LookVector;
-                            local offset = lookVector * 5 + Vector3.new(0, Classes.TPRange.Value, 0);
-                            HumanoidRootPart.CFrame = CFrame.new(
-                                targetPlayer.Character.HumanoidRootPart.Position + offset,
-                                targetPlayer.Character.HumanoidRootPart.Position
-                            );
-                        elseif Type == "Orbit" then
-                            HumanoidRootPart.CFrame = CFrame.new(targetPlayer.Character.HumanoidRootPart.Position) * orbitCF;
-                        elseif Type == "Above" then
-                            local offset = Vector3.new(0, Classes.TPRange.Value, 0);
-                            HumanoidRootPart.CFrame =
-                                CFrame.new(targetPlayer.Character.HumanoidRootPart.Position + offset);
-                        elseif Type == "Below" then
-                            local offset = Vector3.new(0, -Classes.TPRange.Value, 0);
-                            HumanoidRootPart.CFrame =
-                                CFrame.new(targetPlayer.Character.HumanoidRootPart.Position + offset);
-                        elseif Type == "Attach" then
-                            HumanoidRootPart.CFrame = CFrame.new(targetPlayer.Character.HumanoidRootPart.Position);
-                        else
-                            local X, Y, Z = math.random(-6, 6), math.random(-3, 3), math.random(-6, 6);
-                            local XA, YA, ZA =
-                                math.random(-180, 180), math.random(-180, 180), math.random(-180, 180);
-                            HumanoidRootPart.CFrame = CFrame.new(targetPlayer.Character.HumanoidRootPart.Position) *
-                                CFrame.new(X, Y, Z) *
-                                CFrame.Angles(math.rad(XA), math.rad(YA), math.rad(ZA));
-                            camera.CameraSubject = targetPlayer.Character.HumanoidRootPart;
-                        end;
-                        if Type ~= "Random" then
-                            camera.CameraSubject = CameraSubject;
-                        end;
-                    end;
-                else
-                    OnTp = false;
-                    camera.CameraSubject = CameraSubject;
-                end;
-            else
-                OnTp = false;
-                camera.CameraSubject = CameraSubject;
-            end;
-            if not weapon then
-                if getgenv().autoequip then
-                    for _, v in pairs(localplayer.Backpack:GetChildren()) do
-                        if v:IsA("Tool") and (v:FindFirstChild("Hitboxes") or v:GetAttribute("IsRangedWeapon")) then
-                            Character.Humanoid:EquipTool(v);
-                            break;
-                        end;
-                    end;
-                end;
-            end;
-        end;
-    end;
+	local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart");
+	if not HumanoidRootPart then
+		return;
+	end;
+	local weapon = framework:GetWeapon() or framework:GetRanged();
+	local CameraSubject;
+	if Character:GetAttribute("CameraSubject") then
+		CameraSubject = Character:FindFirstChild(Character:GetAttribute("CameraSubject"));
+	else
+		CameraSubject = Character:FindFirstChildOfClass("Humanoid") or HumanoidRootPart;
+	end;
+
+	if not getgenv().stick then
+		StickTarget = nil;
+	end;
+
+	if getgenv().killaura and getgenv().tpenemy then
+		local closestPlayer;
+		local closestDist = math.huge;
+		local mousePos = userinputservice:GetMouseLocation();
+
+		if getgenv().stick and StickTarget then
+			if
+				StickTarget.Parent == players
+				and not framework:InMenu(StickTarget)
+			then
+				closestPlayer = StickTarget;
+			end;
+		end;
+
+		if not closestPlayer and (not getgenv().stick or not StickTarget) then
+			for _, player in pairs(players:GetPlayers()) do
+				if
+					player ~= localplayer
+					and not table.find(whitelist, player.Name)
+					and player.Character
+					and player.Character:FindFirstChild("HumanoidRootPart")
+					and player.Character:FindFirstChildOfClass("Humanoid")
+					and player.Character:FindFirstChildOfClass("Humanoid").Health > 0
+					and not framework:InMenu(player)
+				then
+					local hrp = player.Character.HumanoidRootPart;
+					local screenPos, onScreen = camera:WorldToViewportPoint(hrp.Position);
+					if onScreen then
+						local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude;
+						if dist < closestDist then
+							closestDist = dist;
+							closestPlayer = player;
+						end;
+					end;
+				end;
+			end;
+
+			if getgenv().stick then
+				StickTarget = closestPlayer;
+			end;
+		end;
+
+		if closestPlayer and closestPlayer.Character then
+			local targetHRP = closestPlayer.Character:FindFirstChild("HumanoidRootPart")
+			if targetHRP then
+				OnTp = true;
+				HumanoidRootPart.Velocity = Vector3.zero;
+				HumanoidRootPart.RotVelocity = Vector3.zero;
+				sethiddenproperty(HumanoidRootPart, "PhysicsRepRootPart", targetHRP);
+
+				if Type == "Behind" then
+					local lookVector = -targetHRP.CFrame.LookVector;
+					local offset = lookVector * 5 + Vector3.new(0, Classes.TPRange.Value, 0);
+					HumanoidRootPart.CFrame = CFrame.new(
+						targetHRP.Position + offset,
+						targetHRP.Position
+					);
+				elseif Type == "Orbit" then
+					HumanoidRootPart.CFrame =
+						CFrame.new(targetHRP.Position) * orbitCF;
+				elseif Type == "Above" then
+					HumanoidRootPart.CFrame =
+						CFrame.new(
+							targetHRP.Position +
+								Vector3.new(0, Classes.TPRange.Value, 0)
+						);
+				elseif Type == "Below" then
+					HumanoidRootPart.CFrame =
+						CFrame.new(
+							targetHRP.Position +
+								Vector3.new(0, -Classes.TPRange.Value, 0)
+						);
+				elseif Type == "Attach" then
+					HumanoidRootPart.CFrame =
+						CFrame.new(targetHRP.Position);
+				else
+					local X, Y, Z = math.random(-6, 6), math.random(-3, 3), math.random(-6, 6);
+					local XA, YA, ZA =
+						math.random(-180, 180), math.random(-180, 180), math.random(-180, 180);
+					HumanoidRootPart.CFrame =
+						CFrame.new(targetHRP.Position) *
+						CFrame.new(X, Y, Z) *
+						CFrame.Angles(math.rad(XA), math.rad(YA), math.rad(ZA));
+					camera.CameraSubject = targetHRP;
+				end;
+			end;
+
+			if Type ~= "Random" then
+				camera.CameraSubject = CameraSubject;
+			end;
+		else
+			OnTp = false;
+			camera.CameraSubject = CameraSubject;
+		end;
+	else
+		OnTp = false;
+		camera.CameraSubject = CameraSubject;
+	end;
+	if not weapon and getgenv().autoequip then
+		for _, v in pairs(localplayer.Backpack:GetChildren()) do
+			if v:IsA("Tool") and (v:FindFirstChild("Hitboxes") or v:GetAttribute("IsRangedWeapon")) then
+				Character.Humanoid:EquipTool(v);
+				break;
+			end;
+		end;
+	end;
 end));
 local function Parry(metadata)
     local apdelay = math.round(Classes.APDelay.Value or 0);
@@ -2199,12 +2393,20 @@ local ParryingCharacters = {};
 if PlayerCharacters then
     for i, v in pairs(PlayerCharacters:GetChildren()) do
         if v ~= localplayer.Character and v:FindFirstChildOfClass("Humanoid") then
+            local Player = players:GetPlayerFromCharacter(v);
+            if not Player then
+                continue;
+            end;
             local humanoid = v:FindFirstChildOfClass("Humanoid");
             table.insert(HumanoidToParry, humanoid);
         end;
     end;
     PlayerCharacters.ChildAdded:Connect(function(char)
         if char ~= localplayer.Character and char:FindFirstChildOfClass("Humanoid") then
+            local Player = players:GetPlayerFromCharacter(char);
+            if not Player then
+                return;
+            end;
             local humanoid = char:FindFirstChildOfClass("Humanoid");
             table.insert(HumanoidToParry, humanoid);
         end;
@@ -2378,6 +2580,13 @@ parrysection:AddToggle("AutoEquip", {
 		getgenv().autoequip = v;
 	end;
 });
+parrysection:AddToggle("VoidOnParry", {
+	Text = "void on parry stun";
+	Default = false;
+	Callback = function(v)
+		getgenv().voidonparry = v;
+	end;
+});
 if not Classes.AutoParry then Classes.AutoParry = { Value = false } end;
 if not Classes.RandomChance then Classes.RandomChance = { Value = false } end;
 if not Classes.SmartCheck then Classes.SmartCheck = { Value = false } end;
@@ -2401,7 +2610,7 @@ if modules.Name["SoundHandler"] and modules.Name["SoundHandler"].playSound then
             and sound.parent.Parent.Parent
             and sound.parent.Parent.Parent.Parent
             and sound.parent.Name:match("Hitbox")
-            and sound.parent:FindFirstAncestorOfClass("Tool")
+            and (sound.parent:FindFirstAncestorOfClass("Tool") or sound.parent:FindFirstAncestorOfClass("Model"))
         then
             local Weapon, Metadata = framework:GetWeapon();
             local Other = sound.parent.Parent.Parent.Parent;
@@ -2414,11 +2623,14 @@ if modules.Name["SoundHandler"] and modules.Name["SoundHandler"].playSound then
                     local CanParry = false;
                     if Classes.LookCheck.Value then
                         local BadPlrPos = Other:GetPivot().Position;
-                        local BadPlrDirection = (BadPlrPos - localplayer.Character.Head.Position).Unit;
-                        local ToCheck = localplayer.Character.Head.CFrame.LookVector;
+                        local head = localplayer.Character and localplayer.Character:FindFirstChild("Head")
+                        if head then
+                            local BadPlrDirection = (BadPlrPos - head.Position).Unit;
+                            local ToCheck = head.CFrame.LookVector;
 
-                        if math.deg(math.acos(BadPlrDirection:Dot(ToCheck))) <= Classes.APAngle.Value then
-                            CanParry = true;
+                            if math.deg(math.acos(BadPlrDirection:Dot(ToCheck))) <= Classes.APAngle.Value then
+                                CanParry = true;
+                            end;
                         end;
                     else
                         CanParry = true;
@@ -2507,12 +2719,15 @@ framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function()
                 local CanParry = false;
                 if Classes.LookCheck.Value then
                     local BadPlrPos = rootPart:GetPivot().Position;
-                    local BadPlrDirection = (BadPlrPos - Character.Head.Position).Unit;
-                    local ToCheck = Character.Head.CFrame.LookVector;
+                    local head = Character:FindFirstChild("Head")
+                    if head then
+                        local BadPlrDirection = (BadPlrPos - head.Position).Unit;
+                        local ToCheck = head.CFrame.LookVector;
 
-                    if math.deg(math.acos(BadPlrDirection:Dot(ToCheck))) <= Classes.APAngle.Value then
-                        CanParry = true;
-                    end
+                        if math.deg(math.acos(BadPlrDirection:Dot(ToCheck))) <= Classes.APAngle.Value then
+                            CanParry = true;
+                        end;
+                    end;
                 else
                     CanParry = true;
                 end
@@ -2547,7 +2762,6 @@ if modules.Name["CharacterUtil"] and modules.Name["CharacterUtil"].getIsHittable
                 end
             end
             if not framework:Check(character) then
-				print("anti parry blocked hit on uncheckable character")
 				return
             end
         end
@@ -2604,16 +2818,22 @@ charactertab:AddToggle("walkspeed", {
         end;
     end;
 });
+local jpconn;
 charactertab:AddToggle("jumppower", {
-    Text = "jump power",
-    Default = false,
+    Text = "jump power";
+    Default = false;
     Callback = function(enabled)
         getgenv().jumppowerenabled = enabled;
-        local jumppower = modules.Name["JumpHandlerClient"].getJumpPowerValueContainer();
         if enabled then
-            jumppower:setBaseValue(getgenv().jumppower or 50);
+            jpconn = runservice.Heartbeat:Connect(function()
+                humanoid.JumpPower = getgenv().jumppower;
+            end);
         else
-            jumppower:setBaseValue(50);
+            if jpconn then
+                jpconn:Disconnect();
+                jpconn = nil;
+            end;
+            humanoid.JumpPower = 50;
         end;
     end;
 });
@@ -2769,19 +2989,33 @@ exploit:AddToggle("nodashcd", {
     Default = false;
     Callback = function(Value)
 		getgenv().ndcd = Value; 
-        if Value then
-            modules.Name["DashConstants"].DASH_COOLDOWN = 0;
-        else
-            modules.Name["DashConstants"].DASH_COOLDOWN = 3;
-        end;
+        local dashConstants = modules.Name["DashConstants"];
+        if dashConstants then
+            if Value then
+                if not originalDashCooldown then
+                    originalDashCooldown = dashConstants.DASH_COOLDOWN or 3;
+                end
+                dashConstants.DASH_COOLDOWN = 0;
+            elseif originalDashCooldown then
+                dashConstants.DASH_COOLDOWN = originalDashCooldown;
+            end
+        end
     end;
 });
 
 framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function()
 	framework:SpinLoop();
-    local SessionsData = framework:GetSessionData();
-    if getgenv().ndcd and SessionsData then
-        SessionsData:getState().dashClient.isDashing = false;
+    if getgenv().ndcd then
+        local SessionsData = framework:GetSessionData();
+        local state = SessionsData and SessionsData:getState();
+        local dashState = state and (state.dashClient or state.dodgeClient);
+        if dashState then
+            dashState.isDashing = false;
+            if dashState.canDash == false then dashState.canDash = true; end
+            if dashState.dashCooldown then dashState.dashCooldown = 0; end
+            if dashState.lastDashTick then dashState.lastDashTick = 0; end
+            if dashState.lastDashTime then dashState.lastDashTime = 0; end
+        end
     end;
 end));
 exploit:AddToggle("nnt", {
@@ -2826,6 +3060,30 @@ exploit:AddToggle("nkb", {
     Default = false;
     Callback = function(Value)
         getgenv().nkb = toggles.nkb.Value;
+    end;
+});
+exploit:AddToggle("antifling", {
+    Text = "anti fling";
+    Default = false;
+    Callback = function(Value)
+        getgenv().antifling = Value;
+        if getgenv().AntiFlingConnection then
+            getgenv().AntiFlingConnection:Disconnect();
+            getgenv().AntiFlingConnection = nil;
+        end;
+        if Value then
+            getgenv().AntiFlingConnection = runservice.Stepped:Connect(function()
+                for _, player in pairs(players:GetPlayers()) do
+                    if player ~= localplayer and player.Character then
+                        for _, v in pairs(player.Character:GetDescendants()) do
+                            if v:IsA("BasePart") then
+                                v.CanCollide = false
+                            end
+                        end
+                    end
+                end
+            end)
+        end
     end;
 });
 exploit:AddToggle("noswim", {
@@ -2985,7 +3243,6 @@ exploit1:AddToggle("voidenabled", {
     Default = false,
     Callback = function()
         UpdateFeature("voidenabled", "voidenabledkey", function(state)
-            is_enabled = state
 			getgenv().voidenabled = state;
         end)
     end
@@ -2995,7 +3252,7 @@ exploit1:AddToggle("voidenabled", {
     Mode = "Toggle";
     Callback = function()
         UpdateFeature("voidenabled", "voidenabledkey", function(state)
-            is_enabled = state;
+            getgenv().voidenabled = state;
         end);
     end;
 });
@@ -3124,6 +3381,63 @@ mmisc:AddToggle("antimod", {
     Default = false;
     Callback = function(Value)
         getgenv().antimod = Value;
+        if Value then
+            getgenv().AntiModRunning = true
+            getgenv().AntiModLastCheck = 0
+            local groupId = 5192826
+            local targetRoles = {
+                ["Moderator"] = true,
+                ["Senior Moderator"] = true,
+                ["Developer"] = true,
+                ["Studio Developer"] = true,
+                ["Senior"] = true,
+                ["Lead"] = true,
+                ["Community Team Member"] = true,
+                ["Staff"] = true,
+                ["Admin"] = true,
+                ["Owner"] = true,
+                ["Contributor"] = true,
+            }
+            getgenv().AntiModConnection = runservice.Heartbeat:Connect(function()
+                if not getgenv().antimod then
+                    if getgenv().AntiModConnection then
+                        getgenv().AntiModConnection:Disconnect()
+                        getgenv().AntiModConnection = nil
+                    end
+                    return
+                end
+                if tick() - getgenv().AntiModLastCheck < 2.5 then
+                    return
+                end
+                getgenv().AntiModLastCheck = tick()
+
+                for _, player in ipairs(players:GetPlayers()) do
+                    if player ~= localplayer then
+                        local success, role = pcall(function()
+                            return player:GetRoleInGroup(groupId)
+                        end)
+
+                        if success and targetRoles[role] then
+                            localplayer:Kick(
+                                "Staff Detected By Anti Mod\n"
+                                .. player.DisplayName
+                                .. " (@"
+                                .. player.Name
+                                .. ") - "
+                                .. role
+                            )
+                            return
+                        end
+                    end
+                end
+            end)
+        else
+            getgenv().AntiModRunning = false
+            if getgenv().AntiModConnection then
+                getgenv().AntiModConnection:Disconnect()
+                getgenv().AntiModConnection = nil
+            end
+        end
     end;
 });
 mmisc:AddToggle("ShowRageBotTarget", {
@@ -3746,98 +4060,121 @@ local function AttemptKillTarget(targetPlayer)
 end;
 local loopkillthread = nil;
 local currentTarget = nil;
+local loopkilltarget_hb = nil;
+local attachactive = false;
+
 auto:AddToggle("loopkilltarget", {
     Text = "loop attempt kill target";
     Default = false;
     Callback = function(Value)
         getgenv().loopkilltarget = Value;
+        attachactive = Value;
+
         if not Value then
             currentTarget = nil;
+            attachactive = false;
+
             if loopkillthread then
                 task.cancel(loopkillthread);
                 loopkillthread = nil;
-            end;
+            end
+
+            if loopkilltarget_hb then
+                loopkilltarget_hb:Disconnect();
+                loopkilltarget_hb = nil;
+            end
+
             return;
-        end;
+        end
+
         if framework:InMenu(localplayer) then
             repeat task.wait() until not framework:InMenu(localplayer);
-        end;
-		task.wait(0.1);
-		if not getgenv().falldamage then
-			local hrp = localplayer.Character and localplayer.Character:FindFirstChild("HumanoidRootPart");
-			if hrp then
-				hrp.CFrame = hrp.CFrame + Vector3.new(0, 1000, 0);
-				task.wait(0.2);
-				network:FireServer("StartFallDamage");
-				hrp.CFrame = hrp.CFrame + Vector3.new(0, -1000, 0);
-			end;
-		end;
-		getgenv().falldamage = true;
-        task.wait(0.1)
+        end
+
+        task.wait(0.1);
+
+        if not getgenv().falldamage then
+            local hrp = localplayer.Character and localplayer.Character:FindFirstChild("HumanoidRootPart");
+            if hrp then
+                hrp.CFrame = hrp.CFrame + Vector3.new(0, 1000, 0);
+                task.wait(0.2);
+                network:FireServer("StartFallDamage");
+                hrp.CFrame = hrp.CFrame + Vector3.new(0, -1000, 0);
+            end
+            getgenv().falldamage = true;
+        end
+
+        if loopkilltarget_hb then
+            loopkilltarget_hb:Disconnect();
+            loopkilltarget_hb = nil;
+        end
+        loopkilltarget_hb = runservice.Heartbeat:Connect(function()
+            if not getgenv().loopkilltarget or not attachactive or not currentTarget then return; end
+
+            local targetChar = currentTarget.Character;
+            local myRoot = localplayer.Character and localplayer.Character:FindFirstChild("HumanoidRootPart");
+            if targetChar and targetChar:FindFirstChild("HumanoidRootPart") and myRoot then
+                local rootToUse = driver or myRoot;
+                rootToUse.CFrame = targetChar.HumanoidRootPart.CFrame;
+                sethiddenproperty(rootToUse, "PhysicsRepRootPart", targetChar.HumanoidRootPart);
+            end
+        end);
         if loopkillthread then
             task.cancel(loopkillthread);
-        end;
+            loopkillthread = nil;
+        end
         loopkillthread = task.spawn(LPH_NO_VIRTUALIZE(function()
-            while getgenv().loopkilltarget do
-                if framework:InMenu(localplayer) then
+            while getgenv().loopkilltarget and attachactive do
+                local targetPlayer = SelectedPlayer;
+                local lpChar = localplayer.Character;
+                local lpHumanoid = lpChar and lpChar:FindFirstChild("Humanoid");
+
+                if framework:InMenu(localplayer) or not lpHumanoid or lpHumanoid.Health <= 0 or not targetPlayer or targetPlayer == localplayer then
+                    currentTarget = nil;
                     task.wait(0.2);
                     continue;
-                end;
-                local targetPlayer = SelectedPlayer;
-                if not targetPlayer
-                    or targetPlayer == localplayer then
-                    currentTarget = nil
-                    task.wait(0.2)
-                    continue
                 end
-                local targetChar = targetPlayer.Character
-                if not targetChar 
-                    or not targetChar:FindFirstChild("HumanoidRootPart") 
-                    or not targetChar:FindFirstChild("Humanoid") 
-                    or targetChar.Humanoid.Health <= 0 then
-                    currentTarget = nil
-                    task.wait(0.2)
-                    continue
+
+                local targetChar = targetPlayer.Character;
+                if not targetChar or not targetChar:FindFirstChild("HumanoidRootPart") or not targetChar:FindFirstChild("Humanoid") or targetChar.Humanoid.Health <= 0 then
+                    currentTarget = nil;
+                    task.wait(0.2);
+                    continue;
                 end
+
                 if currentTarget ~= targetPlayer then
-                    currentTarget = targetPlayer
+                    currentTarget = targetPlayer;
                 end
-                while getgenv().loopkilltarget
+
+                while getgenv().loopkilltarget and attachactive
                     and currentTarget == targetPlayer
                     and targetChar.Parent
                     and targetChar:FindFirstChild("Humanoid")
                     and targetChar.Humanoid.Health > 0
+                    and lpHumanoid.Health > 0
                     and not framework:InMenu(localplayer)
                 do
-                    local rootToUse = driver or humanoidrootpart
-                    local attachRoot = targetChar.HumanoidRootPart
-
-                    if rootToUse and attachRoot then
-                        rootToUse.CFrame = attachRoot.CFrame
-                        sethiddenproperty(rootToUse, "PhysicsRepRootPart", attachRoot)
-                    end
-
-                    AttemptKillTarget(targetPlayer)
-                    task.wait(0.05)
+                    AttemptKillTarget(targetPlayer);
+                    task.wait(0.1);
                 end
-                task.wait()
+
+                task.wait(0.1);
             end
-            currentTarget = nil
-            loopkillthread = nil
-        end))
-    end,
-})
-runservice.Heartbeat:Connect(function()
-    if humanoidrootpart and currentTarget then
-        local targetChar = currentTarget.Character
-        if targetChar and targetChar:FindFirstChild("HumanoidRootPart") then
-            local rootToUse = driver or humanoidrootpart
-            local attachRoot = targetChar.HumanoidRootPart
-            rootToUse.CFrame = attachRoot.CFrame
-            sethiddenproperty(rootToUse, "PhysicsRepRootPart", attachRoot)
-        end
-    end
-end)
+            currentTarget = nil;
+            attachactive = false;
+
+            if loopkillthread then
+                task.cancel(loopkillthread);
+                loopkillthread = nil;
+            end
+
+            if loopkilltarget_hb then
+                loopkilltarget_hb:Disconnect();
+                loopkilltarget_hb = nil;
+            end
+        end));
+    end;
+});
 local CanKillAll = false;
 auto:AddToggle("loopkillall", {
 	Text = "loop attempt kill all";
@@ -3931,10 +4268,10 @@ local function StartKillLoop(character)
 							break;
 						end;
 						local rootToUse = driver or humanoidrootpart;
-						AttachRoot = targetPlayer.Character.HumanoidRootPart;
-						if rootToUse and AttachRoot then
-							rootToUse.CFrame = AttachRoot.CFrame;
-							sethiddenproperty(rootToUse, "PhysicsRepRootPart", AttachRoot);
+						local attachRoot = targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart");
+						if rootToUse and attachRoot then
+							rootToUse.CFrame = attachRoot.CFrame;
+							sethiddenproperty(rootToUse, "PhysicsRepRootPart", attachRoot);
 						end;
 						AttemptKillTarget(targetPlayer);
 						task.wait(0.05);
@@ -4060,26 +4397,32 @@ auto:AddToggle("loopflingall", {
     Callback = function(Value)
         if not Value then
             CanFlingAll = false;
-
             if FlingThread then
                 task.cancel(FlingThread);
                 FlingThread = nil;
             end;
-
             return;
         end;
+
+        if framework:InMenu(localplayer) then
+            repeat task.wait() until not framework:InMenu(localplayer)
+        end
+
+        task.wait(0.05)
         CanFlingAll = true;
         FlingThread = task.spawn(LPH_NO_VIRTUALIZE(function()
             while CanFlingAll do
-                while CanFlingAll and framework:InMenu(localplayer) do
-                    task.wait();
-                end;
+                if framework:InMenu(localplayer) then
+                    repeat task.wait() until not framework:InMenu(localplayer)
+                end
                 if not CanFlingAll then break; end;
 
-                if not humanoidrootpart then
+                local LocalRoot = localplayer.Character and localplayer.Character:FindFirstChild("HumanoidRootPart")
+                if not LocalRoot then
                     task.wait(0.1);
                     continue;
                 end;
+
                 local playercount = 0;
                 for i = 1, #CachedPlayers do
                     if not CanFlingAll then break; end;
@@ -4087,29 +4430,32 @@ auto:AddToggle("loopflingall", {
                     if not Player or not Player.Parent then continue; end;
                     if framework:InMenu(Player) then continue; end;
                     if table.find(whitelist, Player.Name) then continue; end;
+
                     local Char = Player.Character;
                     local targetroot = Char and Char:FindFirstChild("HumanoidRootPart");
                     if not targetroot then continue; end;
+
                     local targetpos = targetroot.Position;
                     if targetpos.Y > 280 then continue; end;
                     if (targetpos * Vector3.new(1, 0, 1)).Magnitude > 1200 then continue; end;
+
                     playercount = playercount + 1;
                     local movel = 0.1;
                     local start = tick();
                     while CanFlingAll and tick() - start < 0.15 do
-                        if not humanoidrootpart.Parent or not targetroot.Parent then break; end;
+                        if not LocalRoot.Parent or not targetroot.Parent then break; end;
                         if framework:InMenu(Player) then break; end;
 
-                        humanoidrootpart.CFrame = targetroot.CFrame;
-                        sethiddenproperty(humanoidrootpart, "PhysicsRepRootPart", targetroot);
+                        LocalRoot.CFrame = targetroot.CFrame;
+                        sethiddenproperty(LocalRoot, "PhysicsRepRootPart", targetroot);
 
-                        local vel = humanoidrootpart.Velocity;
-                        humanoidrootpart.Velocity = vel * 150000 + Vector3.new(0, 150000, 0);
+                        local vel = LocalRoot.Velocity;
+                        LocalRoot.Velocity = vel * 150000 + Vector3.new(0, 150000, 0);
 
                         runservice.RenderStepped:Wait();
                         if not CanFlingAll then break; end;
 
-                        humanoidrootpart.Velocity = vel + Vector3.new(0, movel, 0);
+                        LocalRoot.Velocity = vel + Vector3.new(0, movel, 0);
                         movel = -movel;
 
                         runservice.Heartbeat:Wait();
@@ -4122,6 +4468,7 @@ auto:AddToggle("loopflingall", {
         end));
     end;
 });
+
 auto:AddToggle("WhitelistFriends", {
 	Text = "whitelist friends";
 	Default = false;
@@ -4167,7 +4514,7 @@ auto:AddToggle("AutoDetonateC4", {
 auto:AddToggle('SpamBioRepairSound', {
     Text = 'spam bio-repair pen sound',
     Default = false,
-    Tooltip = 'spams bio-repair pen sound',
+    Tooltip = 'spams bio-repair pen sound (use with tool)',
     Callback = function()
         if Toggles.SpamBioRepairSound.Value then
             workspace.ChildAdded:Connect(function(child)
@@ -4181,7 +4528,7 @@ auto:AddToggle('SpamBioRepairSound', {
                     modules.Name["VFXClient"].runAndReplicateEffect("HealthPen", {
                         stomp,
                     }, "jab")
-                    task.wait(0.5)
+                    task.wait(0.3)
                 end
             end))
         end
@@ -4223,6 +4570,163 @@ auto:AddSlider("gloryrange", {
 -- visuals tab
 local visuals = tabs.visuals;
 local espsection = visuals:AddLeftGroupbox("esp");
+local charactersection = visuals:AddLeftGroupbox("character");
+charactersection:AddToggle("RainbowCharacter", {
+    Text = "rainbow character";
+    Default = false;
+});
+
+charactersection:AddToggle("OutlineGlow", {
+    Text = "outline glow";
+    Default = false;
+}):AddColorPicker("OutlineGlowColor", {
+    Default = Color3.new(1, 1, 1);
+    Title = "glow color";
+});
+charactersection:AddDropdown("CharacterMaterial", {
+    Text = "material";
+    Default = "Plastic";
+    Values = {"ForceField", "Plastic"};
+});
+charactersection:AddToggle("CustomMaterialColor", {
+    Text = "material color";
+    Default = false;
+}):AddColorPicker("CharacterMaterialColor", {
+    Default = Color3.new(1, 1, 1);
+    Title = "material color";
+});
+charactersection:AddSlider("CharacterTransparency", {
+    Text = "transparency";
+    Default = 0;
+    Min = 0;
+    Max = 1;
+    Rounding = 1;
+    Compact = true;
+});
+charactersection:AddToggle("RemoveAccessories", {
+    Text = "remove accessories";
+    Default = false;
+});
+
+local fovsection = visuals:AddLeftGroupbox("fov");
+fovsection:AddToggle("ShowFOVCircle", {
+    Text = "show fov circle";
+    Default = false;
+}):AddColorPicker("FOVCircleColor", {
+    Default = Color3.new(1, 1, 1);
+    Title = "fov color";
+});
+
+fovsection:AddToggle("FOVCircleFill", {
+    Text = "fill fov";
+    Default = false;
+}):AddColorPicker("FOVCircleFillColor", {
+    Default = Color3.new(1, 1, 1);
+    Title = "fill color";
+    Transparency = 0.5;
+});
+fovsection:AddToggle("FOVCircleOutline", {
+    Text = "outline";
+    Default = false;
+}):AddColorPicker("FOVCircleOutlineColor", {
+    Default = Color3.new(0, 0, 0);
+    Title = "outline color";
+});
+
+fovsection:AddSlider("FOVCircleSmoothing", {
+    Text = "smoothing";
+    Default = 1;
+    Min = 1;
+    Max = 20;
+    Rounding = 0;
+    Compact = true;
+});
+fovsection:AddSlider("FOVCircleSize", {
+    Text = "size";
+    Default = 100;
+    Min = 10;
+    Max = 1000;
+    Rounding = 0;
+    Compact = true;
+});
+
+local crosshairsection = visuals:AddRightGroupbox("crosshair");
+crosshairsection:AddToggle("CrosshairEnabled", {
+    Text = "crosshair enabled";
+    Default = false;
+}):AddColorPicker("CrosshairColor", {
+    Default = Color3.new(1, 1, 1);
+    Title = "crosshair color";
+});
+crosshairsection:AddToggle("CrosshairOutline", {
+    Text = "outline";
+    Default = false;
+});
+crosshairsection:AddSlider("CrosshairSize", {
+    Text = "size";
+    Default = 10;
+    Min = 1;
+    Max = 50;
+    Rounding = 0;
+    Compact = true;
+});
+crosshairsection:AddSlider("CrosshairGap", {
+    Text = "gap";
+    Default = 5;
+    Min = 0;
+    Max = 20;
+    Rounding = 0;
+    Compact = true;
+});
+crosshairsection:AddSlider("CrosshairThickness", {
+    Text = "thickness";
+    Default = 1;
+    Min = 1;
+    Max = 5;
+    Rounding = 0;
+    Compact = true;
+});
+crosshairsection:AddSlider("CrosshairSmoothing", {
+    Text = "smoothing";
+    Default = 1;
+    Min = 1;
+    Max = 20;
+    Rounding = 0;
+    Compact = true;
+});
+crosshairsection:AddToggle("CrosshairSpin", {
+    Text = "spin crosshair";
+    Default = false;
+});
+crosshairsection:AddSlider("CrosshairSpinSpeed", {
+    Text = "spin speed";
+    Default = 1;
+    Min = 1;
+    Max = 20;
+    Rounding = 0;
+    Compact = true;
+});
+
+local weaponchamssection = visuals:AddRightGroupbox("weapon chams");
+weaponchamssection:AddToggle("WeaponChamsEnabled", {
+    Text = "weapon chams enabled";
+    Default = false;
+}):AddColorPicker("WeaponChamsColor", {
+    Default = Color3.new(1, 0, 0);
+    Title = "chams color";
+});
+weaponchamssection:AddToggle("WeaponChamsHighlight", {
+    Text = "enable highlight";
+    Default = false;
+}):AddColorPicker("WeaponChamsHighlightColor", {
+    Default = Color3.new(1, 0, 0);
+    Title = "highlight color";
+});
+weaponchamssection:AddDropdown("WeaponChamsMaterial", {
+    Text = "material";
+    Default = "Plastic";
+    Values = {"ForceField", "Neon", "Glass", "Plastic"};
+});
 local lightingsection = visuals:AddRightGroupbox("lightning");
 local lightingsection1 = visuals:AddRightGroupbox("fog")
 local Lighting = game:GetService("Lighting");
@@ -4667,6 +5171,13 @@ espsection:AddToggle("Boxes", {
 	Title = "Box Color";
 	Transparency = 0;
 });
+espsection:AddToggle("Highlight", {
+	Text = "highlight";
+	Default = false;
+}):AddColorPicker("HighlightColor", {
+	Default = Color3.new(1, 1, 1);
+	Title = "highlight color";
+});
 espsection:AddToggle("Names", {
 	Text = "name";
 	Default = false;
@@ -4824,16 +5335,45 @@ local currentRagebotTarget = nil;
 
 local FOVCircleSilent = Drawing.new("Circle");
 local FOVCircleAimbot = Drawing.new("Circle");
+local FOVCircleVisuals = Drawing.new("Circle");
+local FOVCircleVisualsOutline = Drawing.new("Circle");
+local FOVCircleVisualsFill = Drawing.new("Circle");
+
 FOVCircleSilent.Visible = false;
 FOVCircleAimbot.Visible = false;
+FOVCircleVisuals.Visible = false;
+FOVCircleVisualsOutline.Visible = false;
+FOVCircleVisualsFill.Visible = false;
+
 FOVCircleSilent.Transparency = 1;
 FOVCircleAimbot.Transparency = 1;
+FOVCircleVisuals.Transparency = 1;
+FOVCircleVisualsOutline.Transparency = 1;
+FOVCircleVisualsFill.Transparency = 0.5;
+
 FOVCircleSilent.Color = Color3.new(1, 1, 1);
 FOVCircleAimbot.Color = Color3.new(1, 1, 1);
+FOVCircleVisuals.Color = Color3.new(1, 1, 1);
+FOVCircleVisualsOutline.Color = Color3.new(0, 0, 0);
+FOVCircleVisualsFill.Color = Color3.new(1, 1, 1);
+
 FOVCircleSilent.Thickness = 1;
 FOVCircleAimbot.Thickness = 1;
+FOVCircleVisuals.Thickness = 1;
+FOVCircleVisualsOutline.Thickness = 0.1;
+FOVCircleVisualsFill.Thickness = 0;
+
 FOVCircleSilent.NumSides = 64;
 FOVCircleAimbot.NumSides = 64;
+FOVCircleVisuals.NumSides = 64;
+FOVCircleVisualsOutline.NumSides = 64;
+FOVCircleVisualsFill.NumSides = 64;
+
+FOVCircleVisualsFill.Filled = true;
+
+local lastFOVCirclePos = userinputservice:GetMouseLocation()
+local currentFOVCircleSize = 50
+local globalRainbowColor = Color3.new(1,1,1)
 
 do
 	-- Add ESP entries to Classes table
@@ -4842,6 +5382,8 @@ do
 		Classes.ESPMaxDistance = Options.ESPMaxDistance;
 		Classes.Boxes = Toggles.Boxes;
 		Classes.BoxColor = Options.BoxColor;
+        Classes.Highlight = Toggles.Highlight;
+        Classes.HighlightColor = Options.HighlightColor;
 		Classes.Names = Toggles.Names;
 		Classes.NameColor = Options.NameColor;
 		Classes.Tracer = Toggles.Tracer;
@@ -4867,6 +5409,29 @@ do
 		Classes.Grenade = Toggles.Grenade;
 		Classes.Claymore = Toggles.Claymore;
 		Classes.Beartrap = Toggles.Beartrap;
+        Classes.RainbowCharacter = Toggles.RainbowCharacter;
+        Classes.GhostTrail = Toggles.GhostTrail;
+        Classes.OutlineGlow = Toggles.OutlineGlow;
+        Classes.OutlineGlowColor = Options.OutlineGlowColor;
+
+        Classes.WeaponChamsEnabled = Toggles.WeaponChamsEnabled;
+        Classes.WeaponChamsColor = Options.WeaponChamsColor;
+        Classes.WeaponChamsMaterial = Options.WeaponChamsMaterial;
+        Classes.WeaponChamsHighlight = Toggles.WeaponChamsHighlight;
+        Classes.WeaponChamsHighlightColor = Options.WeaponChamsHighlightColor;
+        Classes.CharacterMaterial = Options.CharacterMaterial;
+        Classes.CharacterMaterialColor = Options.CharacterMaterialColor;
+        Classes.CharacterTransparency = Options.CharacterTransparency;
+        
+        -- FOV Mappings
+        Classes.ShowFOVCircle = Toggles.ShowFOVCircle;
+        Classes.FOVCircleColor = Options.FOVCircleColor;
+        Classes.FOVCircleFill = Toggles.FOVCircleFill;
+        Classes.FOVCircleFillColor = Options.FOVCircleFillColor;
+        Classes.FOVCircleOutline = Toggles.FOVCircleOutline;
+        Classes.FOVCircleOutlineColor = Options.FOVCircleOutlineColor;
+        Classes.FOVCircleSmoothing = Options.FOVCircleSmoothing;
+        Classes.FOVCircleSize = Options.FOVCircleSize;
 	end
 
 	-- ESP Variables
@@ -5005,6 +5570,15 @@ do
 					if PlayerDrawing then
 						PlayerDrawing.RootPart = Root
 						PlayerDrawing.Humanoid = Hum
+                        -- Recreate Highlight if it was destroyed with the previous character
+                        if not PlayerDrawing.Highlight or not PlayerDrawing.Highlight.Parent then
+                            if PlayerDrawing.Highlight then pcall(function() PlayerDrawing.Highlight:Destroy() end) end
+                            PlayerDrawing.Highlight = Instance.new("Highlight")
+                            PlayerDrawing.Highlight.Name = "ESP_Highlight"
+                            PlayerDrawing.Highlight.FillTransparency = 1
+                            PlayerDrawing.Highlight.OutlineTransparency = 0
+                        end
+                        PlayerDrawing.Highlight.Parent = Character
 					end
 					check(Character)
 					table.insert(PlrConnections[Player], Character.ChildAdded:Connect(OnNewTool))
@@ -5065,9 +5639,15 @@ do
 				TracerOutline = New("Line", nil, "TracerOutline"),
 				Swing = LastSwing,
 				Parry = LastParry,
+                Highlight = Instance.new("Highlight"),
 				RootPart = Root,
 				Humanoid = Hum,
 			}
+            PlayerDrawings[Player].Highlight.Name = "ESP_Highlight"
+            PlayerDrawings[Player].Highlight.Enabled = false
+            PlayerDrawings[Player].Highlight.FillTransparency = 1
+            PlayerDrawings[Player].Highlight.OutlineTransparency = 0 -- Fully visible outline
+            if Character then PlayerDrawings[Player].Highlight.Parent = Character end
 		end
 	end
 
@@ -5096,7 +5676,11 @@ do
 		if PlayerDrawings[Player] then
 			for i, v in pairs(PlayerDrawings[Player]) do
 				if v and i ~= "RootPart" and i ~= "Humanoid" then
-					v:Remove()
+					if i == "Highlight" then
+						v:Destroy()
+					else
+						v:Remove()
+					end
 				end
 			end
 			if PlrConnections[Player] and next(PlrConnections[Player]) then
@@ -5198,14 +5782,24 @@ do
 		Distance.ZIndex = 1
 	end
 
-	framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function()
+		framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function()
 		local mousePos = userinputservice:GetMouseLocation();
 		local screenCenter = camera.ViewportSize / 2;
+        globalRainbowColor = Color3.fromHSV(tick() % 5 / 5, 1, 1)
 		
+        -- Calculate smoothed mouse position and size
+        local smoothAmount = math.max(1, Classes.FOVCircleSmoothing.Value)
+        lastFOVCirclePos = lastFOVCirclePos + (mousePos - lastFOVCirclePos) / smoothAmount
+        
+        local targetSize = Classes.FOVCircleSize.Value
+        currentFOVCircleSize = currentFOVCircleSize + (targetSize - currentFOVCircleSize) / smoothAmount
+
 		if Classes.ShowFOV and Classes.ShowFOV.Value then
 			FOVCircleSilent.Visible = true;
-			FOVCircleSilent.Position = mousePos;
-			FOVCircleSilent.Radius = Classes.FOVSize.Value;
+			FOVCircleSilent.Position = lastFOVCirclePos;
+			FOVCircleSilent.Radius = currentFOVCircleSize;
+            FOVCircleSilent.Color = Options.FOVCircleSilentColor and Options.FOVCircleSilentColor.Value or Color3.new(1, 1, 1);
+            FOVCircleSilent.Thickness = 0.1
 		else
 			FOVCircleSilent.Visible = false;
 		end;
@@ -5214,20 +5808,70 @@ do
 			FOVCircleAimbot.Visible = true;
 			FOVCircleAimbot.Position = screenCenter;
 			FOVCircleAimbot.Radius = Classes.FOVSizeAimbot.Value;
+            FOVCircleAimbot.Color = Options.FOVCircleAimbotColor and Options.FOVCircleAimbotColor.Value or Color3.new(1, 1, 1);
+            FOVCircleAimbot.Thickness = 0.1
 		else
 			FOVCircleAimbot.Visible = false;
 		end;
+
+        -- Visuals FOV Circle
+        if Classes.ShowFOVCircle and Classes.ShowFOVCircle.Value then
+            local fovColor = Classes.FOVCircleColor.Value
+            local fillEnabled = Classes.FOVCircleFill.Value
+            local fillColor = Classes.FOVCircleFillColor.Value
+            local fillTransparency = (Options.FOVCircleFillColor and Options.FOVCircleFillColor.Transparency) or 0.5
+            local outlineEnabled = Classes.FOVCircleOutline.Value
+            local outlineColor = Classes.FOVCircleOutlineColor.Value
+
+            -- Update Outline Circle
+            if outlineEnabled then
+                FOVCircleVisualsOutline.Visible = true
+                FOVCircleVisualsOutline.Position = lastFOVCirclePos
+                FOVCircleVisualsOutline.Radius = currentFOVCircleSize + 1
+                FOVCircleVisualsOutline.Color = outlineColor
+                FOVCircleVisualsOutline.Thickness = 0.1
+                FOVCircleVisualsOutline.ZIndex = 1
+            else
+                FOVCircleVisualsOutline.Visible = false
+            end
+
+            -- Update Main Circle
+            FOVCircleVisuals.Visible = true
+            FOVCircleVisuals.Position = lastFOVCirclePos
+            FOVCircleVisuals.Radius = currentFOVCircleSize
+            FOVCircleVisuals.Color = fovColor
+            FOVCircleVisuals.Thickness = 1
+            FOVCircleVisuals.ZIndex = 2
+            
+            -- Update Fill Circle
+            if fillEnabled then
+                FOVCircleVisualsFill.Visible = true
+                FOVCircleVisualsFill.Position = lastFOVCirclePos
+                FOVCircleVisualsFill.Radius = currentFOVCircleSize
+                FOVCircleVisualsFill.Color = fillColor
+                FOVCircleVisualsFill.Transparency = (1 - fillTransparency)
+                FOVCircleVisualsFill.Filled = true
+                FOVCircleVisualsFill.ZIndex = 0
+            else
+                FOVCircleVisualsFill.Visible = false
+            end
+        else
+            FOVCircleVisuals.Visible = false
+            FOVCircleVisualsOutline.Visible = false
+            FOVCircleVisualsFill.Visible = false
+        end
 	end));
 
 	framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function()
+        local utilEnabled = Classes.UtilityESP.Value
 		for i, v in pairs(UtilityDrawings) do
 			if not v then continue end
-			for i, drawing in pairs(v) do
-				if i ~= "ObjectName" then
+			for _, drawing in pairs(v) do
+				if typeof(drawing) == "table" and drawing.Visible ~= nil then
 					drawing.Visible = false
 				end
 			end
-			if not Classes.UtilityESP.Value then continue end
+			if not utilEnabled then continue end
 
 			local Root = i
 			local Distance = (camera.CFrame.Position - Root.Position).Magnitude
@@ -5288,12 +5932,15 @@ do
 			if not PlayerDrawing then continue end
 
 			for Ind, Drawing in pairs(PlayerDrawing) do
-				if Ind ~= "RootPart" and Ind ~= "Humanoid" and Ind ~= "SessionData" then
+				if Ind ~= "RootPart" and Ind ~= "Humanoid" and Ind ~= "SessionData" and Ind ~= "Highlight" then
 					if Drawing and Drawing.Visible ~= nil then
 						Drawing.Visible = false
 					end
 				end
 			end
+            if PlayerDrawing.Highlight then
+                PlayerDrawing.Highlight.Enabled = false
+            end
 
 			if not Classes.ESP.Value then continue end
 
@@ -5378,6 +6025,21 @@ do
 					BoxOutline.Position = BoxPos
 					BoxOutline.Visible = true
 				end
+                
+                
+                if Classes.Highlight.Value and PlayerDrawing.Highlight then
+                    pcall(function()
+                        PlayerDrawing.Highlight.Enabled = true
+                        if PlayerDrawing.Highlight.Parent ~= Player.Character then
+                            PlayerDrawing.Highlight.Parent = Player.Character
+                        end
+                        PlayerDrawing.Highlight.OutlineColor = Classes.HighlightColor.Value or Color3.new(1, 1, 1)
+                    end)
+                elseif PlayerDrawing.Highlight then
+                    pcall(function()
+                        PlayerDrawing.Highlight.Enabled = false
+                    end)
+                end
 
 				if Classes.SwingCooldown.Value then
 					LastSwing.Visible = true
@@ -5500,8 +6162,13 @@ localPlayer.CharacterAdded:Connect(LPH_NO_VIRTUALIZE(function(char)
 	character = char
 end))
 
+local function isFakePlayer(player)
+	if not player then return true end
+	return false
+end
+
 for _, player in pairs(Players:GetPlayers()) do
-	if player ~= localPlayer then
+	if player ~= localPlayer and not isFakePlayer(player) then
 		cachedPlayers[player] = true
 		player.CharacterAdded:Connect(function()
 			cachedPlayers[player] = true
@@ -5510,7 +6177,7 @@ for _, player in pairs(Players:GetPlayers()) do
 end
 
 Players.PlayerAdded:Connect(LPH_NO_VIRTUALIZE(function(player)
-	if player ~= localPlayer then
+	if player ~= localPlayer and not isFakePlayer(player) then
 		cachedPlayers[player] = true
 		player.CharacterAdded:Connect(function()
 			cachedPlayers[player] = true
@@ -5543,7 +6210,7 @@ aimbot:AddToggle("Aimbot", {
 						local camera = workspace.CurrentCamera
 						local mouse = localPlayer:GetMouse()
 						
-						local fovRadius = Options.FOVSizeAimbot.Value or 500
+						local fovRadius = Options.FOVCircleSize.Value or 500
 						local hitPartName = Options.AimbotHitPart.Value or "Head"
 						
 						local needsNewTarget = not lockedTarget or not lockedTarget.Character or not lockedTarget.Character:FindFirstChild("Humanoid") or lockedTarget.Character.Humanoid.Health <= 0
@@ -5589,18 +6256,22 @@ aimbot:AddToggle("Aimbot", {
 							local inMenu = framework and framework.InMenu and framework:InMenu(lockedTarget)
 							
 							if not inMenu then
+                                local hitPartName = hitPartName
+                                if hitPartName == "Random" then
+                                    hitPartName = R6BodyParts[math.random(1, #R6BodyParts)]
+                                end
 								local targetPart = lockedTarget.Character:FindFirstChild(hitPartName) or lockedTarget.Character:FindFirstChild("HumanoidRootPart")
 								
 								if targetPart then
 									local aimPos = targetPart.Position
 									
 									if Toggles.Prediction.Value then
-										local hrp = lockedTarget.Character:FindFirstChild("HumanoidRootPart")
-										if hrp then
-											local targetVelocity = hrp.Velocity or Vector3.new(0, 0, 0)
-											local predictionAmount = Options.PredictionAmount.Value or 0.13
-											aimPos = aimPos + (targetVelocity * predictionAmount)
-										end
+                                        local hrp = lockedTarget.Character:FindFirstChild("HumanoidRootPart")
+                                        if hrp then
+                                            local targetVelocity = hrp.Velocity or Vector3.new(0, 0, 0)
+                                            local predictionAmount = Options.PredictionAmount.Value or 0.13
+                                            aimPos = aimPos + (targetVelocity * predictionAmount)
+                                        end
 									end
 									
 									if Toggles.Smooth.Value then
@@ -5634,12 +6305,18 @@ aimbot:AddToggle("Aimbot", {
 	Text = "aimbot";
 	NoUI = false;
 });
+aimbot:AddToggle("FOVCircleAimbotColor1", {
+    Text = "fov color";
+    Default = Color3.new(1, 1, 1);
+}):AddColorPicker("FOVCircleAimbotColor", {
+    Default = Color3.new(1, 1, 1);
+    Text = "fov color";
+});
 
 aimbot:AddToggle("AutoSelect", {
 	Text = "auto select";
 	Default = true;
 });
-
 aimbot:AddToggle("Smooth", {
 	Text = "smooth out";
 	Default = false;
@@ -5668,24 +6345,12 @@ aimbot:AddSlider("PredictionAmount", {
 	Compact = true;
 });
 
-aimbot:AddToggle("ShowFOVAimbot", {
-	Text = "show fov";
-	Default = false;
-});
 
-aimbot:AddSlider("FOVSizeAimbot", {
-	Text = "fov size";
-	Default = 500;
-	Min = 10;
-	Max = 1000;
-	Rounding = 0;
-	Compact = true;
-});
 
 aimbot:AddDropdown("AimbotHitPart", {
 	Text = "hit part";
 	Default = "Head";
-	Values = {"Head", "Torso"};
+	Values = {"Head", "Torso", "Random"};
 });
 
 -- Silent Aim Section
@@ -5708,7 +6373,7 @@ silentaim:AddDropdown("SilentHitPart", {
 
 silentaim:AddSlider("SilentAimRange", {
 	Text = "range";
-	Default = 19;
+	Default = 500;
 	Min = 1;
 	Max = 1000;
 	Rounding = 0;
@@ -5725,12 +6390,10 @@ silentaim:AddSlider("HitChance", {
 	Compact = true;
 	Suffix = "%";
 });
-
 silentaim:AddToggle("ShowFOV", {
 	Text = "show fov";
 	Default = false;
 });
-
 silentaim:AddSlider("FOVSize", {
 	Text = "fov size";
 	Default = 500;
@@ -5739,7 +6402,6 @@ silentaim:AddSlider("FOVSize", {
 	Rounding = 0;
 	Compact = true;
 });
-
 silentaim:AddToggle("Resolver", {
 	Text = "resolver";
 	Default = false;
@@ -5874,6 +6536,7 @@ if not Classes.Aimbot then
 	Classes.Prediction = Toggles.Prediction;
 	Classes.Hold = Toggles.Hold;
 	Classes.ShowFOVAimbot = Toggles.ShowFOVAimbot;
+
 	Classes.ShowTargetAB = Toggles.ShowTargetAB;
 	Classes.FOVSizeAimbot = Options.FOVSizeAimbot;
 	Classes.AimbotHitPart = Options.AimbotHitPart;
@@ -5883,6 +6546,7 @@ if not Classes.Aimbot then
 	Classes.SilentAimRange = Options.SilentAimRange;
 	Classes.HitChance = Options.HitChance;
 	Classes.ShowFOV = Toggles.ShowFOV;
+
 	Classes.FOVSize = Options.FOVSize;
 	Classes.Resolver = Toggles.Resolver;
 	Classes.ShowTargetSA = Toggles.ShowTargetSA;
@@ -5901,6 +6565,7 @@ if not Classes.Aimbot then
 	Classes.ShowRageBotTarget = Toggles.ShowRageBotTarget;
 	Classes.RagebotDist = Options.RagebotDist;
 end;
+local Camera = workspace.CurrentCamera
 local KalmanFilter = {}
 KalmanFilter.__index = KalmanFilter
 
@@ -5914,7 +6579,6 @@ function KalmanFilter.new()
 		q = 0.001, -- Process noise
 	}, KalmanFilter)
 end
-
 function KalmanFilter:update(measured_pos, measured_vel, dt)
 	local predicted_x = self.x + self.v * dt + 0.5 * self.a * dt * dt
 	local predicted_v = self.v + self.a * dt
@@ -6023,7 +6687,7 @@ do -- Silent Aim
 	end
 	function newCalculateFire(...)
 		local args = { ... }
-		local target = framework:GetClosestToMouse(Classes.FOVSize.Value)
+		local target = framework:GetClosestToMouse(Options.FOVSize.Value)
 		local ranged, metadata = framework:GetRanged()
 
 		if
@@ -6071,224 +6735,221 @@ do -- Silent Aim
 		local Debris = game:GetService("Debris")
 		Debris:AddItem(child, 0.7)
 	end)
-	
-	task.spawn(LPH_NO_VIRTUALIZE(function()
-    	while task.wait() do
-        	if not Active then
-            	break
-        	end
+    local Activeragebot = true;
+	task.spawn(function()
+		while task.wait() do
+			if not Activeragebot then
+				break
+			end
 
-	        if not getgenv().ragebot then
-	            continue
-	        end
+			if not getgenv().ragebot then
+				continue
+			end
 
-	        local Character = localplayer.Character
-	        if not Character then
-	            continue
-	        end
+			local Character = localplayer.Character
+			if not Character then
+				continue
+			end
 
-	        local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
-	        if not HumanoidRootPart then
-	            continue
-	        end
+			local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
+			if not HumanoidRootPart then
+				continue
+			end
 
-	        local forcefield = Character:FindFirstChildOfClass("ForceField")
-	        if forcefield and forcefield.Name ~= "ff" then
-	            continue
-	        end
+			local forcefield = Character:FindFirstChildOfClass("ForceField")
+			if forcefield and forcefield.Name ~= "ff" then
+				continue
+			end
 
-	        local ranged, metadata = framework:GetRanged()
-	        if not ranged or not metadata then
-	            continue
-	        end
+			local ranged, metadata = framework:GetRanged()
+			if not ranged or not metadata then
+				continue
+			end
 
-	        local player = LockedTarget or framework:GetClosest2(Classes.RagebotDist.Value)
+			local player = LockedTarget or framework:GetClosest2(Classes.RagebotDist.Value)
 
-	        if LockedTarget and not next(LockedTarget) then
-	           LockedTarget = nil
- 	           continue
- 	       end
+			if LockedTarget and not next(LockedTarget) then
+				LockedTarget = nil
+				continue
+			end
 
- 	       if not player or not next(player) then
- 	           continue
- 	       end
+			if not player or not next(player) then
+				continue
+			end
 
- 	       metadata.canShootBulletssss = metadata.canShootBulletssss or true
+			if metadata.canShootBulletssss == nil then
+				metadata.canShootBulletssss = true
+			end
 
- 	       if metadata._clientAmmoVO.Value <= 0 then
- 	           network:FireServer("StartRangedReload", ranged)
- 	           task.wait(metadata._itemConfig.reloadTime - 0.2)
- 	           if ranged then
- 	               pcall(function()
- 	                   local reloaded, _ = network:InvokeServer("FinishedRangedReload", ranged)
- 	                   if reloaded then
- 	                       metadata._clientAmmoVO.Value = metadata._itemConfig.maxAmmo
- 	                       metadata.canShootBulletssss = true
- 	                   end
- 	               end)
- 	           end
- 	           continue
- 	       end
-
- 	       if not metadata.canShootBulletssss then
- 	           if metadata._itemConfig.maxAmmo == 1 then
- 	               metadata.canShootBulletssss = true
- 	           else
- 	               continue
- 	           end
- 	       end
-
-	        if not metadata._mainCasterBehavior or not metadata._mainCaster then
-	            continue
-	        end
-
-	        local targetPlayer = players:FindFirstChild(next(player))
-	        if not targetPlayer or not targetPlayer.Character then
-	            continue
-	        end
-
-	        local targetHumanoid = targetPlayer.Character:FindFirstChild("Humanoid")
-	        if not targetHumanoid or targetHumanoid.Health == 0 then
-	            LockedTarget = nil
-	            continue
-	        end
-
-	        if framework:InMenu(targetPlayer) then
-	            LockedTarget = nil
-	            continue
-	        end
-
-	        local Head = targetPlayer.Character:FindFirstChild("Head")
-        	if not Head or targetPlayer.Character:FindFirstChildOfClass("ForceField") then
- 	           LockedTarget = nil
-            	continue
- 	       end
-
- 	       local success, err = pcall(function()
-            metadata.canShootBulletssss = false
- 	           LockedTarget = player
-
- 	           local params = metadata._mainCasterBehavior.RaycastParams
-	            local filter = params.FilterDescendantsInstances or {}
-	            local newFilter = table.clone(filter)
-	            table.insert(newFilter, PlayerCharacters)
-	            table.insert(newFilter, Map)
-	            table.insert(newFilter, Workspace.Terrain)
-	            params.FilterDescendantsInstances = newFilter
-
-	            local origin = metadata:getCheatedBackOriginIfInObject(params)
-	            local projectileSpeed = metadata._itemConfig.speed or 200
-	            local projectileGravity = metadata._itemConfig.gravity or Vector3.new(0, 0, 0)
-
-	            local finalPos = PredictTargetPosition(
-	                origin,
-	                { Position = Head.Position, Velocity = Head.Velocity },
-	                projectileSpeed,
-	                LocalPlayer:GetNetworkPing() * 1000,
-	                projectileGravity
-	            )
-
-	            local CF = CFrame.new(Vector3.new(), (finalPos - origin).Unit)
-	            local dir = OldCalculateFire(CF, 0, 0, 5000)
-
-	            local fakeBehavior = {
-	                RaycastParams = params,
-	                Acceleration = Vector3.new(),
-	                MaxDistance = 5000,
-	                HighFidelityBehavior = 1,
-	                HighFidelitySegmentSize = 0.5,
-	                CosmeticBulletContainer = EffectsJunk,
-	                AutoIgnoreContainer = true,
-	            }
-
-	            local template = metadata._cosmeticProjectileTemplate
-	            if typeof(fakeBehavior) == "Instance" then
-	                fakeBehavior.CosmeticBulletProvider = nil
-	                fakeBehavior.CosmeticBulletTemplate = template
-	            else
-	                fakeBehavior.CosmeticBulletProvider = template
-	                fakeBehavior.CosmeticBulletTemplate = nil
-	            end
-
-	            local cast = metadata._mainCaster:Fire(origin, dir, projectileSpeed, fakeBehavior)
-	            metadata._cheatId = (metadata._cheatId or 0) + 1
-	            cast.UserData = {
-	                ["player"] = LocalPlayer,
-	                ["tool"] = ranged,
-	                ["shotId"] = tostring(metadata._cheatId),
-	                ["origin"] = origin,
-					["chargePercentage"] = metadata._chargeProgressVO.Value,
-	            }
-				
-				network:FireServer("RangedFire", ranged, origin,
-    				{ [tostring(metadata._cheatId)] = dir.Unit },
-   				    { [tostring(metadata._cheatId)] = dir },
-    				{ [1] = tostring(metadata._cheatId) },
-    				nil,
-    				Camera.CFrame,
-    				Workspace:GetServerTimeNow(),
-    				metadata._chargeProgressVO.Value
-				)
-	            metadata._clientAmmoVO.Value = metadata._clientAmmoVO.Value - 1
-	            local distance = (origin - Head.Position).Magnitude
-	            local timeToHit = distance / projectileSpeed
-	            if not (ranged.Name == "Longbow" or ranged.Name == "Crossbow" or ranged.Name == "Heavy Bow") then
-	                task.delay(timeToHit + 0.08, function()
-	                    if cast.UserData and cast.StateInfo and cast.StateInfo.UpdateConnection then
-	                        if Toggles.ShowLine.Value then
-	                            local part = Instance.new("Part")
-	                            part.Anchored = true
-	                            part.CanCollide = false
-	                            part.Material = Enum.Material.Neon
-	                            part.Color = Options.linecolor.Value
-	                            part.Size = Vector3.new(0.1, 0.1, (Head.Position - HumanoidRootPart.Position).Magnitude)
-	                            part.CFrame = CFrame.new(HumanoidRootPart.Position, Head.Position) * CFrame.new(0, 0, -part.Size.Z / 2)
-	                            part.Transparency = 0
-	                            part.Parent = workspace
-	                            task.spawn(LPH_NO_VIRTUALIZE(function()
-	                                local fadeTime = 2
-	                                local steps = 30
-	                                for i = 1, steps do
-	                                    part.Transparency = i / steps
-	                                    task.wait(fadeTime / steps)
-	                                end
-	                                part:Destroy()
-	                            end))
-	                        end
-	                        metadata._mainCaster.RayHit:Fire(cast, {
-	                            Distance = 1,
-	                            Instance = Head,
-	                            Material = Enum.Material.SmoothPlastic,
-	                            Position = Head.Position,
-	                            Normal = Vector3.yAxis,
-	                        }, nil, cast.RayInfo.CosmeticBulletObject)
-	                        cast:Terminate()
-	                    end
-	                end)
-	            end
-	        end)
-	        if not success then
-	            warn("ragebot firing error: " .. tostring(err))
-	            metadata.canShootBulletssss = true 
-	        end
-
-	        task.wait(metadata._itemConfig.cooldown)
-
-	        if metadata._clientAmmoVO.Value <= 0 then
-	            network:FireServer("StartRangedReload", ranged)
- 	           task.wait(metadata._itemConfig.reloadTime - 0.2)
- 	           if ranged then
- 	               pcall(function()
- 	                   local reloaded, _ = network:InvokeServer("FinishedRangedReload", ranged)
- 	                   if reloaded then
- 	                       metadata._clientAmmoVO.Value = metadata._itemConfig.maxAmmo
+			if metadata._clientAmmoVO.Value <= 0 then
+				network:FireServer("StartRangedReload", ranged)
+				task.wait(metadata._itemConfig.reloadTime - 0.2)
+				if ranged then
+					pcall(function()
+						local reloaded, _ = network:InvokeServer("FinishedRangedReload", ranged)
+						if reloaded then
+							metadata._clientAmmoVO.Value = metadata._itemConfig.maxAmmo
+							metadata.canShootBulletssss = true
 						end
- 	               end)
-           		end
-	        end
+					end)
+				end
+				continue
+			end
+
+			if not metadata.canShootBulletssss then
+				if metadata._itemConfig.maxAmmo == 1 then
+					metadata.canShootBulletssss = true
+				else
+					continue
+				end
+			end
+
+			if not metadata._mainCasterBehavior or not metadata._mainCaster then
+				continue
+			end
+
+			local targetPlayer = players:FindFirstChild(next(player))
+			if not targetPlayer or not targetPlayer.Character then
+				continue
+			end
+
+			local targetHumanoid = targetPlayer.Character:FindFirstChild("Humanoid")
+			if not targetHumanoid or targetHumanoid.Health == 0 then
+				LockedTarget = nil
+				continue
+			end
+
+			if framework:InMenu(targetPlayer) then
+				LockedTarget = nil
+				continue
+			end
+
+			local Head = targetPlayer.Character:FindFirstChild("Head")
+			if not Head or targetPlayer.Character:FindFirstChildOfClass("ForceField") then
+				LockedTarget = nil
+				continue
+			end
+
+			metadata.canShootBulletssss = false
+
+			LockedTarget = player
+
+			metadata._mainCasterBehavior.RaycastParams.FilterDescendantsInstances = {
+				metadata._mainCasterBehavior.RaycastParams.FilterDescendantsInstances,
+				PlayerCharacters,
+				Map,
+				Workspace.Terrain,
+			}
+
+			local origin = metadata:getCheatedBackOriginIfInObject(metadata._mainCasterBehavior.RaycastParams)
+			local projectileSpeed = metadata._itemConfig.speed or 200
+			local projectileGravity = metadata._itemConfig.gravity or Vector3.new(0, 0, 0)
+
+			local finalPos = PredictTargetPosition(
+				origin,
+				{ Position = Head.Position, Velocity = Head.Velocity },
+				projectileSpeed,
+				LocalPlayer:GetNetworkPing() * 1000,
+				projectileGravity
+			)
+
+			local CF = CFrame.new(Vector3.new(), (finalPos - origin).Unit)
+			local dir = OldCalculateFire(CF, 0, 0, 5000)
+
+			local fakeBehavior = {
+				RaycastParams = metadata._mainCasterBehavior.RaycastParams,
+				Acceleration = Vector3.new(),
+				MaxDistance = 5000,
+				HighFidelityBehavior = 1,
+				HighFidelitySegmentSize = 0.5,
+				CosmeticBulletContainer = EffectsJunk,
+				AutoIgnoreContainer = true,
+			}
+
+			local template = metadata._cosmeticProjectileTemplate
+			if typeof(fakeBehavior) == "Instance" then
+				fakeBehavior.CosmeticBulletProvider = nil
+				fakeBehavior.CosmeticBulletTemplate = template
+			else
+				fakeBehavior.CosmeticBulletProvider = template
+				fakeBehavior.CosmeticBulletTemplate = nil
+			end
+
+			local cast = metadata._mainCaster:Fire(origin, dir, projectileSpeed, fakeBehavior)
+			metadata._cheatId = metadata._cheatId and metadata._cheatId + 1 or 1
+			cast.UserData = {
+				["player"] = LocalPlayer,
+				["tool"] = ranged,
+				["shotId"] = tostring(metadata._cheatId),
+				["origin"] = origin,
+				["chargePercentage"] = metadata._chargeProgressVO.Value,
+			}
+
+			network:FireServer("RangedFire", ranged, origin, {
+				[tostring(metadata._cheatId)] = dir.Unit,
+			}, {
+				[tostring(metadata._cheatId)] = dir,
+			}, {
+				[1] = tostring(metadata._cheatId),
+			}, nil, Camera.CFrame, Workspace:GetServerTimeNow(), metadata._chargeProgressVO.Value)
+			metadata._clientAmmoVO.Value = metadata._clientAmmoVO.Value - 1
+
+			local distance = (origin - Head.Position).Magnitude
+			local timeToHit = distance / projectileSpeed
+
+			if not (ranged.Name == "Longbow" or ranged.Name == "Crossbow" or ranged.Name == "Heavy Bow") then
+				task.delay(timeToHit + 0.08, function()
+					if cast.UserData and cast.StateInfo and cast.StateInfo.UpdateConnection then
+						if Toggles.ShowLine.Value then
+							local part = Instance.new("Part")
+							part.Anchored = true
+							part.CanCollide = false
+							part.Material = Enum.Material.Neon
+							part.Color = Options.linecolor.Value
+							part.Size = Vector3.new(0.1, 0.1, (Head.Position - HumanoidRootPart.Position).Magnitude)
+							part.CFrame = CFrame.new(HumanoidRootPart.Position, Head.Position)
+								* CFrame.new(0, 0, -part.Size.Z / 2)
+							part.Transparency = 0
+							part.Parent = workspace
+							task.spawn(function()
+								local fadeTime = 2
+								local steps = 30
+								for i = 1, steps do
+									part.Transparency = i / steps
+									task.wait(fadeTime / steps)
+								end
+								part:Destroy()
+							end)
+						end
+						metadata._mainCaster.RayHit:Fire(cast, {
+							Distance = 1,
+							Instance = Head,
+							Material = Enum.Material.SmoothPlastic,
+							Position = Head.Position,
+							Normal = Vector3.yAxis,
+						}, nil, cast.RayInfo.CosmeticBulletObject)
+						cast:Terminate()
+					end
+				end)
+			end
+			task.wait(metadata._itemConfig.cooldown)
+
+			if metadata._clientAmmoVO.Value <= 0 then
+				network:FireServer("StartRangedReload", ranged)
+				task.wait(metadata._itemConfig.reloadTime - 0.2)
+
+				if ranged then
+					pcall(function()
+						local reloaded, _ = network:InvokeServer("FinishedRangedReload", ranged)
+						if reloaded then
+							metadata._clientAmmoVO.Value = metadata._itemConfig.maxAmmo
+						end
+					end)
+				end
+			end
 			metadata.canShootBulletssss = true
-	    end
-	end))
+		end
+	end)
 end
 local snipertext = "";
 local status = sniper:AddLabel("status: idle")
@@ -6356,7 +7017,6 @@ sniper:AddButton({
     end;
 });
 library.KeybindFrame.Visible = true; -- settings
-settings:AddButton("unload", function() library:Unload(); end);
 settings:AddLabel("menu bind"):AddKeyPicker("menubind", {Default = "RightAlt", NoUI = true, Text = "toggle ui"});
 library.ToggleKeybind = Options.menubind;
 thememanager:SetLibrary(library);
@@ -6365,4 +7025,454 @@ savemanager:SetLibrary(library);
 savemanager:SetFolder("serenium/configs");
 savemanager:BuildConfigSection(tabs.settings);
 savemanager:LoadAutoloadConfig();
+local function CreateCharacterVisuals()
+    local charHighlight = Instance.new("Highlight")
+    charHighlight.Name = "CharacterVisualsHighlight"
+    charHighlight.FillTransparency = 1
+    charHighlight.OutlineTransparency = 0
+
+    local originalData = {
+        Parts = {}, -- [Part] = {Material, Color, Transparency, TextureID}
+        Decals = {}, -- [Decal/Texture] = {Texture, Transparency}
+        Meshes = {}, -- [SpecialMesh] = {TextureId, MeshId}
+        Accessories = {}, -- List of accessories
+        Char = nil
+    }
+
+    local trailGhosts = {}
+    local lastSettings = {}
+    local appliedToChar = nil
+    local charConnections = {}
+
+    local function ClearConnections()
+        for _, v in pairs(charConnections) do
+            if v and v.Disconnect then v:Disconnect() end
+        end
+        charConnections = {}
+    end
+
+    local function ClearOriginalData()
+        originalData.Parts = {}
+        originalData.Decals = {}
+        originalData.Meshes = {}
+        originalData.Accessories = {}
+        originalData.Char = nil
+    end
+
+    local function StoreOriginalData(char)
+        if originalData.Char == char then return end
+        ClearOriginalData()
+        originalData.Char = char
+        
+        for _, v in ipairs(char:GetDescendants()) do
+            if v:IsA("BasePart") then
+                local isHRP = (v.Name == "HumanoidRootPart")
+                local isHitbox = v.Name:lower():find("hitbox")
+                if isHRP or isHitbox then continue end
+
+                originalData.Parts[v] = {
+                    Material = v.Material,
+                    Color = v.Color,
+                    Transparency = v.Transparency
+                }
+                if v:IsA("MeshPart") then
+                    originalData.Parts[v].TextureID = v.TextureID
+                end
+                
+                local sm = v:FindFirstChildOfClass("SpecialMesh")
+                if sm then
+                    originalData.Meshes[sm] = {
+                        TextureId = sm.TextureId,
+                        MeshId = sm.MeshId
+                    }
+                end
+            elseif v:IsA("Decal") or v:IsA("Texture") then
+                originalData.Decals[v] = {
+                    Texture = v.Texture,
+                    Transparency = v.Transparency
+                }
+            elseif v:IsA("Accessory") then
+                table.insert(originalData.Accessories, v)
+            end
+        end
+    end
+
+    local function ApplyVisuals()
+        local char = localplayer.Character
+        if not char or not next(originalData.Parts) then return end
+        
+        local isRainbow = Toggles.RainbowCharacter and Toggles.RainbowCharacter.Value
+        local customColor = Toggles.CustomMaterialColor and Toggles.CustomMaterialColor.Value
+        local mat = Classes.CharacterMaterial and Classes.CharacterMaterial.Value
+        local matColor = Classes.CharacterMaterialColor and Classes.CharacterMaterialColor.Value
+        local transparency = Classes.CharacterTransparency and Classes.CharacterTransparency.Value or 0
+        local removeAcc = Toggles.RemoveAccessories and Toggles.RemoveAccessories.Value
+        local outlineGlow = Classes.OutlineGlow and Classes.OutlineGlow.Value
+        local glowColor = Classes.OutlineGlowColor and Classes.OutlineGlowColor.Value
+
+        local isForceField = (mat == "ForceField")
+        local isNeon = (mat == "Neon")
+
+        -- Apply to base parts
+        for part, data in pairs(originalData.Parts) do
+            if not part or not part.Parent then continue end
+            
+            -- Material
+            if mat == "ForceField" then
+                part.Material = Enum.Material.ForceField
+            elseif mat == "Neon" then
+                part.Material = Enum.Material.Neon
+            elseif mat == "Plastic" then
+                part.Material = Enum.Material.Plastic
+            else
+                part.Material = data.Material
+            end
+            
+            -- Color
+            if not isRainbow then
+                if customColor or isForceField or isNeon then
+                    part.Color = matColor
+                else
+                    part.Color = data.Color
+                end
+            end
+            
+            -- Transparency
+            if transparency > 0 and data.Transparency < 0.95 then
+                part.Transparency = transparency
+            else
+                part.Transparency = data.Transparency
+            end
+            
+            -- MeshPart Textures
+            if part:IsA("MeshPart") then
+                local isHead = (part.Name == "Head")
+                if (isRainbow or isForceField) and not isHead then
+                    part.TextureID = ""
+                else
+                    part.TextureID = data.TextureID or ""
+                end
+            end
+        end
+        
+        -- Apply to SpecialMeshes
+        for mesh, data in pairs(originalData.Meshes) do
+            if not mesh or not mesh.Parent then continue end
+            local isHead = (mesh.Parent.Name == "Head")
+            if (isRainbow or isForceField) and not isHead then
+                mesh.TextureId = ""
+            else
+                mesh.TextureId = data.TextureId
+            end
+        end
+        
+        -- Apply to Decals/Textures
+        for decal, data in pairs(originalData.Decals) do
+            if not decal or not decal.Parent then continue end
+            local isFace = decal.Name:lower():find("face") or (decal.Parent and decal.Parent.Name == "Head")
+            
+            if (isRainbow or isForceField) and not isFace then
+                decal.Texture = ""
+            else
+                decal.Texture = data.Texture
+            end
+            
+            if transparency > 0 and not isFace then
+                decal.Transparency = math.max(data.Transparency, transparency)
+            else
+                decal.Transparency = data.Transparency
+            end
+        end
+        
+        -- Accessories
+        if removeAcc then
+            for _, acc in ipairs(originalData.Accessories) do
+                if acc and acc:IsA("Accessory") and acc.Parent == char then
+                    local isFace = acc.Name:lower():find("face") or acc.Name:lower():find("facial") or acc.Name:lower():find("head")
+                    if not isFace then
+                        acc.Parent = nil
+                    end
+                end
+            end
+            -- Also scan current character children for any stragglers not in originalData
+            for _, v in ipairs(char:GetChildren()) do
+                if v:IsA("Accessory") then
+                    local isFace = v.Name:lower():find("face") or v.Name:lower():find("facial") or v.Name:lower():find("head")
+                    if not isFace then
+                        if not table.find(originalData.Accessories, v) then
+                            table.insert(originalData.Accessories, v)
+                        end
+                        v.Parent = nil
+                    end
+                end
+            end
+        else
+            for _, acc in ipairs(originalData.Accessories) do
+                if acc and acc:IsA("Accessory") and acc.Parent ~= char then
+                    acc.Parent = char
+                end
+            end
+        end
+        
+        -- Outline Glow
+        if outlineGlow then
+            charHighlight.Parent = char
+            charHighlight.OutlineColor = isRainbow and globalRainbowColor or glowColor
+        else
+            charHighlight.Parent = nil
+        end
+    end
+
+    runservice.Heartbeat:Connect(LPH_NO_VIRTUALIZE(function()
+        local char = localplayer.Character
+        if not char or not char:FindFirstChild("HumanoidRootPart") then
+            charHighlight.Parent = nil
+            appliedToChar = nil
+            if backtrackGhost then backtrackGhost:Destroy(); backtrackGhost = nil end
+            for _, g in ipairs(trailGhosts) do g:Destroy() end
+            trailGhosts = {}
+            ClearOriginalData()
+            ClearConnections()
+            return
+        end
+        
+        -- Check if re-storing is needed
+        if originalData.Char ~= char then
+            -- Wait for appearance: check for any accessory or non-default color
+            local appearanceReady = false
+            for _, v in ipairs(char:GetChildren()) do
+                if v:IsA("Accessory") then
+                    appearanceReady = true
+                    break
+                elseif v:IsA("BasePart") and v.Name ~= "HumanoidRootPart" then
+                    if v.Color ~= Color3.fromRGB(163, 162, 165) then
+                        appearanceReady = true
+                        break
+                    end
+                end
+            end
+            
+            if appearanceReady then
+                ClearConnections()
+                StoreOriginalData(char)
+                
+                -- Dynamic Accessory Handling
+                table.insert(charConnections, char.ChildAdded:Connect(function(child)
+                    if child:IsA("Accessory") then
+                        task.wait() -- Let it initialize
+                        local removeAcc = Toggles.RemoveAccessories and Toggles.RemoveAccessories.Value
+                        local isFace = child.Name:lower():find("face") or child.Name:lower():find("facial") or child.Name:lower():find("head")
+                        
+                        if not table.find(originalData.Accessories, child) then
+                            table.insert(originalData.Accessories, child)
+                        end
+                        
+                        if removeAcc and not isFace then
+                            child.Parent = nil
+                        end
+                    end
+                end))
+
+                appliedToChar = nil -- Force update
+            else
+                return -- Skip until loaded
+            end
+        end
+        
+        -- Settings monitoring
+        local isRainbow = Toggles.RainbowCharacter and Toggles.RainbowCharacter.Value
+        local currentSettings = {
+            Material = Classes.CharacterMaterial and Classes.CharacterMaterial.Value,
+            Color = Classes.CharacterMaterialColor and Classes.CharacterMaterialColor.Value,
+            Transparency = Classes.CharacterTransparency and Classes.CharacterTransparency.Value,
+            Rainbow = isRainbow,
+            CustomColor = Toggles.CustomMaterialColor and Toggles.CustomMaterialColor.Value,
+            RemoveAcc = Toggles.RemoveAccessories and Toggles.RemoveAccessories.Value,
+            OutlineGlow = Classes.OutlineGlow and Classes.OutlineGlow.Value,
+            OutlineColor = Classes.OutlineGlowColor and Classes.OutlineGlowColor.Value
+        }
+        
+        local settingsChanged = (appliedToChar ~= char)
+        if not settingsChanged then
+            for k, v in pairs(currentSettings) do
+                if lastSettings[k] ~= v then
+                    settingsChanged = true
+                    break
+                end
+            end
+        end
+        
+        if settingsChanged then
+            lastSettings = currentSettings
+            appliedToChar = char
+            ApplyVisuals()
+        end
+        
+        -- Frame updates for Rainbow
+        if isRainbow then
+            for part, _ in pairs(originalData.Parts) do
+                if part and part.Parent and part:IsA("BasePart") then
+                    part.Color = globalRainbowColor
+                end
+            end
+            if charHighlight.Parent then
+                charHighlight.OutlineColor = globalRainbowColor
+            end
+        end
+    end))
+end
+
+local function CreateMoreVisuals()
+    local fovCircle = Drawing.new("Circle")
+    fovCircle.Thickness = 1
+    fovCircle.NumSides = 100
+    fovCircle.Visible = false
+    
+    local fovCircleOutline = Drawing.new("Circle")
+    fovCircleOutline.Thickness = 1
+    fovCircleOutline.NumSides = 100
+    fovCircleOutline.Visible = false
+    
+    local chOut1 = Drawing.new("Line")
+    local chOut2 = Drawing.new("Line")
+    local chOut3 = Drawing.new("Line")
+    local chOut4 = Drawing.new("Line")
+    
+    local chLine1 = Drawing.new("Line")
+    local chLine2 = Drawing.new("Line")
+    local chLine3 = Drawing.new("Line")
+    local chLine4 = Drawing.new("Line")
+    
+    local weaponHighlight = Instance.new("Highlight")
+    weaponHighlight.Name = "WeaponCham"
+    
+    local lastCrosshairPos = userinputservice:GetMouseLocation()
+    local currentRotation = 0
+
+    -- Cache for Weapon Chams optimization
+    local lastTool = nil
+    local lastChamSettings = { Material = nil, Color = nil, Highlight = nil, HighlightColor = nil }
+
+    runservice.RenderStepped:Connect(function(dt)
+        -- Redundant FOV logic removed to prevent conflicts with Unified FOV handling in ESP section.
+
+        -- Crosshair
+        if Classes.CrosshairEnabled and Classes.CrosshairEnabled.Value then
+            local mouseLoc = userinputservice:GetMouseLocation()
+            local smoothAmount = math.max(1, Classes.CrosshairSmoothing.Value)
+            lastCrosshairPos = lastCrosshairPos + (mouseLoc - lastCrosshairPos) / smoothAmount
+            
+            local center = lastCrosshairPos
+            local size = Classes.CrosshairSize.Value
+            local gap = Classes.CrosshairGap.Value
+            local thick = Classes.CrosshairThickness.Value
+            local color = Classes.CrosshairColor.Value
+            
+            if Classes.CrosshairSpin.Value then
+                currentRotation = (currentRotation + (Classes.CrosshairSpinSpeed.Value * dt)) % (math.pi * 2)
+            else
+                currentRotation = 0
+            end
+
+            local function getRotated(offset)
+                local cos = math.cos(currentRotation)
+                local sin = math.sin(currentRotation)
+                return Vector2.new(
+                    (offset.X * cos) - (offset.Y * sin),
+                    (offset.X * sin) + (offset.Y * cos)
+                )
+            end
+
+            -- Update Lines
+            local function updateLine(line, outline, fromOff, toOff)
+                local f = center + getRotated(fromOff)
+                local t = center + getRotated(toOff)
+                
+                if Classes.CrosshairOutline and Classes.CrosshairOutline.Value then
+                    outline.From = f
+                    outline.To = t
+                    outline.Thickness = thick + 1.5 -- Small overlap
+                    outline.Color = Color3.new(0, 0, 0)
+                    outline.Visible = true
+                else
+                    outline.Visible = false
+                end
+                
+                line.From = f
+                line.To = t
+                line.Thickness = thick
+                line.Color = color
+                line.Visible = true
+            end
+
+            updateLine(chLine1, chOut1, Vector2.new(0, gap), Vector2.new(0, gap + size))
+            updateLine(chLine2, chOut2, Vector2.new(0, -gap), Vector2.new(0, -(gap + size)))
+            updateLine(chLine3, chOut3, Vector2.new(gap, 0), Vector2.new(gap + size, 0))
+            updateLine(chLine4, chOut4, Vector2.new(-gap, 0), Vector2.new(-(gap + size), 0))
+        else
+            chLine1.Visible = false; chLine2.Visible = false; chLine3.Visible = false; chLine4.Visible = false
+            chOut1.Visible = false; chOut2.Visible = false; chOut3.Visible = false; chOut4.Visible = false
+        end
+
+        -- Weapon Chams
+        if Classes.WeaponChamsEnabled and Classes.WeaponChamsEnabled.Value then
+            local char = localplayer.Character
+            local tool = char and char:FindFirstChildOfClass("Tool")
+            if tool and tool:IsDescendantOf(char) then
+                local chamColor = Classes.WeaponChamsColor and Classes.WeaponChamsColor.Value or Color3.new(1,0,0)
+                local highEnabled = Classes.WeaponChamsHighlight and Classes.WeaponChamsHighlight.Value
+                local highColor = Classes.WeaponChamsHighlightColor and Classes.WeaponChamsHighlightColor.Value or chamColor
+                local mat = Classes.WeaponChamsMaterial and Classes.WeaponChamsMaterial.Value
+                
+                -- Optimization: Only update if tool or settings changed
+                local settingsChanged = lastTool ~= tool or 
+                                       lastChamSettings.Material ~= mat or 
+                                       lastChamSettings.Color ~= chamColor or 
+                                       lastChamSettings.Highlight ~= highEnabled or
+                                       lastChamSettings.HighlightColor ~= highColor
+
+                if settingsChanged then
+                    lastTool = tool
+                    lastChamSettings = { Material = mat, Color = chamColor, Highlight = highEnabled, HighlightColor = highColor }
+
+                    if highEnabled then
+                        weaponHighlight.Enabled = true
+                        weaponHighlight.Parent = tool
+                        weaponHighlight.FillColor = highColor
+                        weaponHighlight.OutlineColor = highColor
+                        weaponHighlight.FillTransparency = 0.5
+                        weaponHighlight.OutlineTransparency = 0
+                    else
+                        weaponHighlight.Enabled = false
+                        weaponHighlight.Parent = nil
+                    end
+                    
+                    if mat then
+                        for _, part in ipairs(tool:GetDescendants()) do
+                            if part:IsA("BasePart") then
+                                part.Material = Enum.Material[mat]
+                                if mat == "Neon" then
+                                    part.Color = chamColor
+                                end
+                            end
+                        end
+                    end
+                end
+            else
+                if lastTool ~= nil then
+                    weaponHighlight.Enabled = false
+                    weaponHighlight.Parent = nil
+                    lastTool = nil
+                end
+            end
+        elseif lastTool ~= nil then
+            weaponHighlight.Enabled = false
+            weaponHighlight.Parent = nil
+            lastTool = nil
+        end
+    end)
+end
+
+task.spawn(CreateCharacterVisuals)
+task.spawn(CreateMoreVisuals)
 thememanager:ApplyToTab(tabs.settings);
