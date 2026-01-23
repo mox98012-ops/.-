@@ -1,30 +1,6 @@
 game:GetService("Players").LocalPlayer:WaitForChild("CharacterLoaded");
 game:GetService("Players").LocalPlayer:WaitForChild("DataLoadedClient");
 game:GetService("Players").LocalPlayer:WaitForChild("DataLoaded");
-local allowselfkick = true;
-local mt = getrawmetatable(game);
-setreadonly(mt, false);
-local oldNamecall = mt.__namecall;
-local oldIndex = mt.__index;
-mt.__namecall = newcclosure(function(self, ...)
-    local method = getnamecallmethod();
-    if method == "Kick" then
-        if not checkcaller() then
-            return;
-        end;
-        if not allowselfkick then
-            return;
-        end;
-    end;
-    return oldNamecall(self, ...);
-end);
-mt.__index = newcclosure(function(self, key)
-    if key == "Kick" and not checkcaller() then
-        return;
-    end;
-    return oldIndex(self, key);
-end);
-setreadonly(mt, true);
 if getgenv().serenium_LOADED then
 	return;
 end;
