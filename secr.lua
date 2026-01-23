@@ -3889,7 +3889,6 @@ mmisc:AddToggle("antimod", {
             local groupid = 5192826;
             local roles = {
                 ["Community Senior"] = true;
-				["Combat Warrior"] = true;
                 ["Community Moderator"] = true;
                 ["Game Moderator"] = true;
                 ["Senior Moderator"] = true;
