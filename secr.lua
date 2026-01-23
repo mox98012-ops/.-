@@ -1,3 +1,6 @@
+game:GetService("Players").LocalPlayer:WaitForChild("CharacterLoaded");
+game:GetService("Players").LocalPlayer:WaitForChild("DataLoadedClient");
+game:GetService("Players").LocalPlayer:WaitForChild("DataLoaded");
 if getgenv().serenium_LOADED then
 	return;
 end;
@@ -10,9 +13,6 @@ if not LPH_OBFUSCATED then
     LPH_JIT = function(...) return ...; end;
     LPH_JIT_MAX = function(...) return ...; end;
 end;
-game:GetService("Players").LocalPlayer:WaitForChild("CharacterLoaded");
-game:GetService("Players").LocalPlayer:WaitForChild("DataLoadedClient");
-game:GetService("Players").LocalPlayer:WaitForChild("DataLoaded");
 for _, void in pairs(game.workspace:GetDescendants()) do
 	if void.Name == "VoidCollidePart" and void:IsA("Part") then
 		void.CanTouch = false;
@@ -123,65 +123,67 @@ local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xectr
 local savemanager = loadstring(game:HttpGet("https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/refs/heads/main/addons/SaveManager.lua"))();
 local thememanager = loadstring(game:HttpGet("https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/refs/heads/main/addons/ThemeManager.lua"))();
 local window = library:CreateWindow({Title = "serenium.hvh                                    combat warriors", Center = true, AutoShow = true, TabPadding = 8, MenuFadeTime = 0});
-local SERENIUM_TEXT = "serenium.hvh"
-local COMBAT_TEXT   = "                                       combat warriors"
-local COMBAT_RICH   = '<font color="rgb(255,0,0)">combat warriors</font>'
-local function applyStaticText(label)
-    label.RichText = true
-    label.Text = SERENIUM_TEXT .. COMBAT_TEXT:gsub("combat warriors", COMBAT_RICH)
-end
-local function colorTitle(window)
-    if not window then return false end
-    local windowInstance = window.Instance or window.Window or window._window
-    if not windowInstance then
-        local libraryUI = library.Instance or library._instance
-        if libraryUI then
-            windowInstance = libraryUI
-        end
-    end
-	local utility = {}
-	utility.instance_new = function(className, props)
-		local inst = Instance.new(className)
-		if props then
-			for i, v in pairs(props) do
-				inst[i] = v
-			end
-		end
-		return inst
+do
+	local SERENIUM_TEXT = "serenium.hvh"
+	local COMBAT_TEXT   = "                                       combat warriors"
+	local COMBAT_RICH   = '<font color="rgb(255,0,0)">combat warriors</font>'
+	local function applyStaticText(label)
+	    label.RichText = true
+	    label.Text = SERENIUM_TEXT .. COMBAT_TEXT:gsub("combat warriors", COMBAT_RICH)
 	end
-    local function isTitleLabel(label)
-        return label:IsA("TextLabel")
-            and label.Text
-            and label.Text:find(SERENIUM_TEXT)
-            and label.Text:find("combat warriors")
-    end
-    local candidates
-    if windowInstance and windowInstance:IsA("Instance") then
-        candidates = windowInstance:GetDescendants()
-    else
-        candidates = game:GetService("CoreGui"):GetDescendants()
-    end
-    for _, label in ipairs(candidates) do
-        if isTitleLabel(label) then
-            applyStaticText(label)
-            return true
-        end
-    end
+	local function colorTitle(window)
+	    if not window then return false end
+	    local windowInstance = window.Instance or window.Window or window._window
+	    if not windowInstance then
+	        local libraryUI = library.Instance or library._instance
+	        if libraryUI then
+	            windowInstance = libraryUI
+	        end
+	    end
+		local utility = {}
+		utility.instance_new = function(className, props)
+			local inst = Instance.new(className)
+			if props then
+				for i, v in pairs(props) do
+					inst[i] = v
+				end
+			end
+			return inst
+		end
+	    local function isTitleLabel(label)
+	        return label:IsA("TextLabel")
+	            and label.Text
+	            and label.Text:find(SERENIUM_TEXT)
+	            and label.Text:find("combat warriors")
+	    end
+	    local candidates
+	    if windowInstance and windowInstance:IsA("Instance") then
+	        candidates = windowInstance:GetDescendants()
+	    else
+	        candidates = game:GetService("CoreGui"):GetDescendants()
+	    end
+	    for _, label in ipairs(candidates) do
+	        if isTitleLabel(label) then
+	            applyStaticText(label)
+	            return true
+	        end
+	    end
 
-    return false
-end
-for i = 1, 30 do
-    if colorTitle(window) then break end
-    task.wait(0.1)
-end
-game:GetService("CoreGui").DescendantAdded:Connect(function(descendant)
-    if descendant:IsA("TextLabel")
-        and descendant.Text
-        and descendant.Text:find(SERENIUM_TEXT)
-        and descendant.Text:find("combat warriors") then
-        applyStaticText(descendant)
-    end
-end)
+	    return false
+	end
+	for i = 1, 30 do
+	    if colorTitle(window) then break end
+	    task.wait(0.1)
+	end
+	game:GetService("CoreGui").DescendantAdded:Connect(function(descendant)
+	    if descendant:IsA("TextLabel")
+	        and descendant.Text
+	        and descendant.Text:find(SERENIUM_TEXT)
+	        and descendant.Text:find("combat warriors") then
+	        applyStaticText(descendant)
+	    end
+	end)
+end;
 local tabs = {main = window:AddTab('main'), ranged = window:AddTab("ranged"); charactertab = window:AddTab("character"), misc = window:AddTab("misc"), visuals = window:AddTab("visuals"), sniper = window:AddTab("sniper"), settings = window:AddTab("settings")};
 
 -- tabs
@@ -225,8 +227,8 @@ local humanoidrootpart = character:WaitForChild("HumanoidRootPart");
 local humanoid = character:WaitForChild("Humanoid");
 local workspace = game:GetService("Workspace");
 local function GetPlayerCharacters()
-    return workspace:FindFirstChild("PlayerCharacters") or workspace:FindFirstChild("Characters") or workspace
-end
+    return workspace:FindFirstChild("PlayerCharacters") or workspace:FindFirstChild("Characters") or workspace;
+end;
 local PlayerCharacters = GetPlayerCharacters()
 local ParryingCharacters = {};
 library.IgnoreWhileTyping = true;
@@ -1923,7 +1925,7 @@ do
 		return;
 	end));
 	framework:argmodify("TakeFallDamage", {}, LPH_NO_VIRTUALIZE(function(n, ...)
-		if not checkcaller() and not CanFireStartFallDamage and getgenv().nfd then
+		if not checkcaller() and not CanFireStartFallDamage then
 			return;
 		end;
 		return;
@@ -1965,15 +1967,21 @@ do
         return oldfunc(...);
     end));
 	local function nkb(funckey)
-		return function(part, ...)
-			if typeof(part) == "Instance" and part:IsDescendantOf(character) and getgenv().nkb then
-				return;
+		return function(oldfunc, self, ...)
+			local char = character or (localplayer and localplayer.Character);
+			if getgenv().nkb and char then
+				for i = 1, select("#", ...) do
+					local v = select(i, ...);
+					if typeof(v) == "Instance" and (v == char or v:IsDescendantOf(char)) then
+						return;
+					end;
+				end;
 			end;
-			return old[funckey](part, ...)
+			return oldfunc(self, ...)
 		end;
 	end;
 	hook("KnockbackHandler", "knockbackCharacterPart", nkb("KnockbackHandler_knockbackCharacterPart"));
-	hook( "KnockbackHandler", "knockbackCharacterPartAngular", nkb("KnockbackHandler_knockbackCharacterPartAngular"));
+	hook("KnockbackHandler", "knockbackCharacterPartAngular", nkb("KnockbackHandler_knockbackCharacterPartAngular"));
 	hook("KnockbackHandler", "impulseCharacterPart", nkb("KnockbackHandler_impulseCharacterPart"));
 	hook("KnockbackHandler", "impulseCharacterPartAngular", nkb("KnockbackHandler_impulseCharacterPartAngular"));
 	if remotes then
@@ -3278,148 +3286,172 @@ charactertab:AddToggle("velocity", {
         end);
     end;
 });
-charactertab:AddToggle("walkspeed", {
-    Text = "walkspeed";
-    Default = false;
-    Callback = function(enabled)
-        getgenv().walkspeedenabled = enabled;
-        local wsHandler = modules.Name["WalkSpeedHandlerClient"].getValueContainer();
-        if enabled then
-            wsHandler:setBaseValue(getgenv().walkspeed or 16);
-        else
-            wsHandler:setBaseValue(16);
-        end;
-    end;
-});
-local jpconn;
-charactertab:AddToggle("jumppower", {
-    Text = "jump power";
-    Default = false;
-    Callback = function(enabled)
-        getgenv().jumppowerenabled = enabled;
-        if enabled then
-            jpconn = runservice.Heartbeat:Connect(function()
-                humanoid.JumpPower = getgenv().jumppower;
-            end);
-        else
-            if jpconn then
-                jpconn:Disconnect();
-                jpconn = nil;
-            end;
-            humanoid.JumpPower = 50;
-        end;
-    end;
-});
-charactertab:AddToggle('NoAnimations', {
-    Text = 'no animations',
-    Default = false,
-    Tooltip = 'stops all character animations',
-    Callback = function()
-        if Toggles.NoAnimations.Value then
-            task.spawn(LPH_NO_VIRTUALIZE(function()
-                while Toggles.NoAnimations.Value do
-                    if character and humanoid then
-                        for i, v in humanoid:GetPlayingAnimationTracks() do
-                            if v.Animation ~= spinAnim then
-                                v:Stop()
-                            end
-                        end
-                    end
-                    runservice.RenderStepped:Wait()
-                end
-            end))
-        end
-    end
-})
-charactertab:AddToggle("spin", {
-    Text = "spin";
-    Default = false;
-    Callback = function(Value)
-    	spineabled = Value;
-    end;
-});
-charactertab:AddToggle("infjump", {
-    Text = "infinite jump";
-    Default = false;
-    Callback = function(Value)
-        if Value then
-            Con = userinputservice.InputBegan:Connect(function(i, gp)
-                if gp then return; end;
-                if i.KeyCode == Enum.KeyCode.Space and humanoid then
-                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping);
-                end;
-            end);
-        else
-            if Con then
-                Con:Disconnect();
-                Con = nil;
-            end;
-        end;
-    end;
-});
-charactertab:AddSlider("flyspeed", {
-    Text = "fly speed",
-    Default = 16,
-    Min = 16,
-    Max = 5000,
-    Rounding = 0,
-    Compact = true,
-	Callback = function(Value)
-		getgenv().flyspeed = Value;
-	end;
-});
-charactertab:AddSlider("walkspeed2", {
-    Text = "walk speed";
-    Default = 16;
-    Min = 16;
-    Max = 100;
-    Rounding = 0;
-    Compact = true;
-    Callback = function(value)
-        getgenv().walkspeed = value;
-        local wsHandler = modules.Name["WalkSpeedHandlerClient"].getValueContainer();
-        if getgenv().walkspeedenabled then
-            wsHandler:setBaseValue(value);
-        end;
-    end;
-});
-charactertab:AddSlider("jumppower2", {
-    Text = "jump power",
-    Default = 50,
-    Min = 50,
-    Max = 200,
-    Rounding = 0,
-    Compact = true,
-    Callback = function(value)
-        getgenv().jumppower = value;
-        local jumppower = modules.Name["JumpHandlerClient"].getJumpPowerValueContainer();
-        if getgenv().jumppowerenabled then
-            jumppower:setBaseValue(value);
-        end;
-    end;
-});
-charactertab:AddSlider("speed", {
-    Text = "velocity speed";
-    Default = 16;
-    Min = 16;
-    Max = 1000;
-    Rounding = 0;
-    Compact = true;
-	Callback = function(Value)
-		getgenv().velocityspeed = Value;
-	end;
-});
-charactertab:AddSlider("spinspeed", {
-    Text = "spin speed";
-    Default = 10;
-    Min = 10;
-    Max = 100;
-    Rounding = 0;
-    Compact = true;
-    Callback = function(Value)
-        spinspeed = Value;
-    end;
-});
+do
+	local applied = false;
+	charactertab:AddToggle("walkspeed", {
+	    Text = "walkspeed";
+	    Default = false;
+	    Callback = function(enabled)
+	        getgenv().walkspeedenabled = enabled;
+	        local wshandler = modules.Name["WalkSpeedHandlerClient"].getValueContainer();
+	        if not wshandler then
+	            return;
+	        end;
+	        local delta = (getgenv().walkspeed or 16) - 16;
+	        if enabled and not applied then
+	            applied = true;
+	            wshandler:addBaseValueAdditive(delta);
+	        elseif not enabled and applied then
+	            applied = false;
+	            wshandler:removeBaseValueAdditive(delta);
+	        end;
+	    end;
+	});
+
+	local jpconn;
+	charactertab:AddToggle("jumppower", {
+	    Text = "jump power";
+	    Default = false;
+	    Callback = function(enabled)
+	        getgenv().jumppowerenabled = enabled;
+	        if enabled then
+	            jpconn = runservice.Heartbeat:Connect(function()
+	                local jumppower = modules.Name["JumpHandlerClient"].getJumpPowerValueContainer();
+	                jumppower:setBaseValue(getgenv().jumppower);
+	            end);
+	        else
+	            if jpconn then
+	                jpconn:Disconnect();
+	                jpconn = nil;
+	            end;
+	            local jumppower = modules.Name["JumpHandlerClient"].getJumpPowerValueContainer();
+	            jumppower:setBaseValue(50);
+	        end;
+	    end;
+	});
+
+	charactertab:AddToggle('NoAnimations', {
+	    Text = 'no animations',
+	    Default = false,
+	    Tooltip = 'stops all character animations',
+	    Callback = function()
+	        if Toggles.NoAnimations.Value then
+	            task.spawn(LPH_NO_VIRTUALIZE(function()
+	                while Toggles.NoAnimations.Value do
+	                    if character and humanoid then
+	                        for i, v in humanoid:GetPlayingAnimationTracks() do
+	                            if v.Animation ~= spinAnim then
+	                                v:Stop()
+	                            end
+	                        end
+	                    end
+	                    runservice.RenderStepped:Wait()
+	                end
+	            end))
+	        end
+	    end
+	});
+
+	charactertab:AddToggle("spin", {
+	    Text = "spin";
+	    Default = false;
+	    Callback = function(Value)
+	    	spineabled = Value;
+	    end;
+	});
+
+	charactertab:AddToggle("infjump", {
+	    Text = "infinite jump";
+	    Default = false;
+	    Callback = function(Value)
+	        if Value then
+	            Con = userinputservice.InputBegan:Connect(function(i, gp)
+	                if gp then return; end;
+	                if i.KeyCode == Enum.KeyCode.Space and humanoid then
+	                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping);
+	                end;
+	            end);
+	        else
+	            if Con then
+	                Con:Disconnect();
+	                Con = nil;
+	            end;
+	        end;
+	    end;
+	});
+
+	charactertab:AddSlider("flyspeed", {
+	    Text = "fly speed",
+	    Default = 16,
+	    Min = 16,
+	    Max = 5000,
+	    Rounding = 0,
+	    Compact = true,
+		Callback = function(Value)
+			getgenv().flyspeed = Value;
+		end;
+	});
+
+	charactertab:AddSlider("walkspeed2", {
+    	Text = "walk speed";
+    	Default = 16;
+    	Min = 16;
+    	Max = 100;
+    	Rounding = 0;
+    	Compact = true;
+    	Callback = function(value)
+    	    local old = getgenv().walkspeed;
+    	    getgenv().walkspeed = value;
+    	    if getgenv().walkspeedenabled then
+    	        local wshandler = modules.Name["WalkSpeedHandlerClient"].getValueContainer();
+    	        if wshandler then
+    	            wshandler:removeBaseValueAdditive(old - 16);
+    	            wshandler:addBaseValueAdditive(value - 16);
+    	        end;
+    	    end;
+    	end;
+	});
+
+	charactertab:AddSlider("jumppower2", {
+	    Text = "jump power",
+	    Default = 50,
+	    Min = 50,
+	    Max = 200,
+	    Rounding = 0,
+	    Compact = true,
+	    Callback = function(value)
+	        getgenv().jumppower = value;
+	        if getgenv().jumppowerenabled then
+	            local jumppower = modules.Name["JumpHandlerClient"].getJumpPowerValueContainer();
+	            jumppower:setBaseValue(value);
+	        end;
+	    end;
+	});
+
+	charactertab:AddSlider("speed", {
+	    Text = "velocity speed",
+	    Default = 16,
+	    Min = 16,
+	    Max = 1000,
+	    Rounding = 0,
+	    Compact = true,
+		Callback = function(Value)
+			getgenv().velocityspeed = Value;
+		end;
+	});
+
+	charactertab:AddSlider("spinspeed", {
+	    Text = "spin speed",
+	    Default = 10,
+	    Min = 10,
+	    Max = 100,
+	    Rounding = 0,
+	    Compact = true,
+	    Callback = function(Value)
+	        spinspeed = Value;
+	    end;
+	});
+end;
 -- exploits
 exploit:AddToggle("infstamina", {
     Text = "infinite stamina";
@@ -3640,20 +3672,10 @@ exploit:AddToggle("ngpe", {
 exploit:AddToggle("walkonwater", {
     Text = "walk on water";
     Default = false;
-    Callback = function(Value)
-        for i, v in workspace:WaitForChild("Map"):GetDescendants() do
-            if v:IsA("BasePart") and v.Name == "WaterArea" then
-                v.CanCollide = Value;
-            end;
-        end;
-    end;
 });
 exploit:AddToggle("ragdoll",{
     Text = "ragdoll";
     Default = false;
-    Callback = function(Value)
-        humanoid:WaitForChild("RagdollRemoteEvent"):FireServer(Value);
-    end;
 });
 exploit:AddToggle("speedyboi", {
     Text = "fast animation";
@@ -5016,7 +5038,7 @@ auto:AddToggle('SpamBioRepairSound', {
                     modules.Name["VFXClient"].runAndReplicateEffect("HealthPen", {
                         stomp,
                     }, "jab")
-                    task.wait(0.3)
+                    task.wait(0.01)
                 end
             end))
         end
@@ -5580,11 +5602,60 @@ if Map then
 		end;
 	end);
 end;
-
 OldCorrection = ColorCorrection.TintColor;
-
+local lastupdate = 0;
+local interval = 3;
+local looping = false;
+framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function(dt)
+    local value = Toggles.walkonwater.Value;
+    if value then
+        if not looping then
+            looping = true;
+            lastupdate = interval;
+        end;
+        lastupdate = lastupdate + dt;
+        if lastupdate >= interval then
+            lastupdate = 0;
+            for _, v in workspace:WaitForChild("Map"):GetDescendants() do
+                if v:IsA("BasePart") and v.Name == "WaterArea" then
+                    v.CanCollide = true;
+                end;
+            end;
+        end;
+    else
+        if looping then
+            for _, v in workspace:WaitForChild("Map"):GetDescendants() do
+                if v:IsA("BasePart") and v.Name == "WaterArea" then
+                    v.CanCollide = false;
+                end;
+            end;
+            looping = false;
+            lastupdate = 0;
+        end;
+    end;
+end));
+local ragdolling = false;
 framework:BindToRenderStep(
-	LPH_NO_VIRTUALIZE(function()
+    LPH_NO_VIRTUALIZE(function()
+        local canragdoll = Toggles.ragdoll.Value;
+        if not localplayer.Character then return; end;
+        local humanoid = localplayer.Character:FindFirstChild("Humanoid");
+        local remote = humanoid and humanoid:FindFirstChild("RagdollRemoteEvent");
+        if not remote then return end
+        local ragdolled = humanoid:GetAttribute("IsRagdolledServer");
+        if canragdoll then
+            if not ragdolling then
+                ragdolling = true;
+            end;
+            if not ragdolled then
+                remote:FireServer(true);
+            end;
+        else
+            if ragdolling then
+                remote:FireServer(false);
+                ragdolling = false;
+            end;
+		end;
 		framework:GetSessionData():getState().fallDamageClient.isDisabled = getgenv().nfd;
 		if not Lighting:FindFirstChild("atmosphere") then
 			Instance.new("Atmosphere", Lighting).Name = "atmosphere";
