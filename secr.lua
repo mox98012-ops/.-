@@ -139,6 +139,16 @@ local function colorTitle(window)
             windowInstance = libraryUI
         end
     end
+	local utility = {}
+	utility.instance_new = function(className, props)
+		local inst = Instance.new(className)
+		if props then
+			for i, v in pairs(props) do
+				inst[i] = v
+			end
+		end
+		return inst
+	end
     local function isTitleLabel(label)
         return label:IsA("TextLabel")
             and label.Text
@@ -193,6 +203,7 @@ local sniper = tabs.sniper:AddLeftGroupbox("sniper");
 local aimbot = tabs.ranged:AddLeftGroupbox("aimbot");
 local gunmods = tabs.ranged:AddLeftGroupbox("gun mods");
 local silentaim = tabs.ranged:AddRightGroupbox("silent aim");
+local Classes = {};
 
 -- others
 local whitelist = {};
@@ -479,6 +490,386 @@ runservice.Stepped:Connect(LPH_NO_VIRTUALIZE(function()
     end;
 end));
 
+local HitDetectionImpl = {
+    Sounds = {
+        OSU = "rbxassetid://7149255551",
+        Neverlose = "rbxassetid://8679627751",
+        Bameware = "rbxassetid://3124331820",
+        skeet = "rbxassetid://5633695679",
+        Rust = "rbxassetid://5043539486",
+        ["Lazer Beam"] = "rbxassetid://130791043",
+        ["Bow Hit"] = "rbxassetid://1053296915",
+        ["TF2 Hitsound"] = "rbxassetid://2868331684",
+        ["TF2 Critical"] = "rbxassetid://296102734"
+    },
+    Labels = {},
+    YOffset = 0
+};
+HitDetectionImpl.CreateLog = function(text)
+    local screen = workspace.CurrentCamera.ViewportSize
+    local prefixBase = "serenium"
+    local prefixHvh = ".hvh"
+    local restOfText = text:sub(#"serenium.hvh" + 1)
+    
+    local hvhColor = (Options and Options.HvhColor) and Options.HvhColor.Value or Color3.fromRGB(150, 0, 255)
+    local textSize = 19
+    local textFont = 2 -- Bold-ish Monospace
+
+    local labelBase = Drawing.new("Text")
+    labelBase.Text = prefixBase
+    labelBase.Size = textSize
+    labelBase.Font = textFont
+    labelBase.Outline = true
+    labelBase.Color = Color3.new(1, 1, 1)
+    labelBase.Visible = true
+    labelBase.Transparency = 0
+    labelBase.ZIndex = 15
+    
+    local labelHvh = Drawing.new("Text")
+    labelHvh.Text = prefixHvh
+    labelHvh.Size = textSize
+    labelHvh.Font = textFont
+    labelHvh.Outline = true
+    labelHvh.Color = hvhColor
+    labelHvh.Visible = true
+    labelHvh.Transparency = 0
+    labelHvh.ZIndex = 15
+
+    local labelRest = Drawing.new("Text")
+    labelRest.Text = restOfText
+    labelRest.Size = textSize
+    labelRest.Font = textFont
+    labelRest.Outline = true
+    labelRest.Color = Color3.new(1, 1, 1)
+    labelRest.Visible = true
+    labelRest.Transparency = 0
+    labelRest.ZIndex = 15
+    
+    local targetX = screen.X / 2
+    local finalY = screen.Y - 180 - HitDetectionImpl.YOffset
+    local totalWidth = labelBase.TextBounds.X + labelHvh.TextBounds.X + labelRest.TextBounds.X
+    local offsetFromCenter = totalWidth / 2
+    
+    local function setPos(currentX)
+        labelBase.Position = Vector2.new(currentX - offsetFromCenter, finalY)
+        labelHvh.Position = Vector2.new(labelBase.Position.X + labelBase.TextBounds.X, finalY)
+        labelRest.Position = Vector2.new(labelHvh.Position.X + labelHvh.TextBounds.X, finalY)
+    end
+    
+    -- Initial Pos (shifted left)
+    setPos(targetX - 30)
+
+    table.insert(HitDetectionImpl.Labels, {labelBase, labelHvh, labelRest})
+    HitDetectionImpl.YOffset = HitDetectionImpl.YOffset + 22
+
+    task.spawn(function()
+        -- Slide In + Fade In
+        local slideSteps = 10
+        for i = 1, slideSteps do
+            local progress = i / slideSteps
+            local currentX = (targetX - 30) + (30 * progress)
+            labelBase.Transparency = progress
+            labelHvh.Transparency = progress
+            labelRest.Transparency = progress
+            setPos(currentX)
+            task.wait(0.015)
+        end
+        
+        task.wait(1.6) -- Disappear after 1.6 seconds
+
+        -- Fade Out
+        for i = 1, 10 do
+            local trans = 1 - (i / 10)
+            labelBase.Transparency = trans
+            labelHvh.Transparency = trans
+            labelRest.Transparency = trans
+            task.wait(0.04)
+        end
+        labelBase.Visible = false
+        labelHvh.Visible = false
+        labelRest.Visible = false
+        labelBase:Remove()
+        labelHvh:Remove()
+        labelRest:Remove()
+        
+        for i, v in ipairs(HitDetectionImpl.Labels) do
+            if v[1] == labelBase then
+                table.remove(HitDetectionImpl.Labels, i)
+                break
+            end
+        end
+        if #HitDetectionImpl.Labels == 0 then
+            HitDetectionImpl.YOffset = 0
+        end
+        if HitDetectionImpl.YOffset > 300 then -- Limit upward stacking to prevent going off-screen
+            HitDetectionImpl.YOffset = 0
+        end
+    end)
+end;
+HitDetectionImpl.PlaySound = function(soundName, volume)
+    if soundName == "None" or not HitDetectionImpl.Sounds[soundName] then return end;
+    local sound = Instance.new("Sound");
+    sound.SoundId = HitDetectionImpl.Sounds[soundName];
+    sound.Volume = volume or 1;
+    sound.Parent = game:GetService("SoundService");
+    sound:Play();
+    sound.Ended:Connect(function() sound:Destroy(); end);
+end;
+HitDetectionImpl.CreateEffect = function(effectType, part, color, damage)
+    if not part or not part.Position or part.Name == "FakeHitbox" then return end
+    local mainColor = color or Color3.new(1, 1, 1)
+
+    if effectType == "Clone (Forcefield)" or effectType == "Clone (Neon)" then 
+        local targetChar = part:FindFirstAncestorOfClass("Model")
+        if not targetChar or not targetChar:FindFirstChild("Humanoid") then return end
+        
+        targetChar.Archivable = true
+        local clone = targetChar:Clone()
+        clone.Parent = nil -- Keep NIL until configured
+        clone.Humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+        clone.Humanoid.PlatformStand = true -- Prevent simulation
+        
+        local isNeon = effectType == "Clone (Neon)"
+        
+        for _, v in pairs(clone:GetDescendants()) do
+            if v:IsA("BasePart") then
+                v.Material = isNeon and Enum.Material.Neon or Enum.Material.ForceField
+                v.Color = mainColor
+                v.CanCollide = false
+                v.Anchored = true
+                v.CanQuery = false
+                v.CanTouch = false
+                v.Velocity = Vector3.new(0, 0, 0)
+                v.RotVelocity = Vector3.new(0, 0, 0)
+                
+                -- Remove textures from body parts
+                if v:IsA("MeshPart") then
+                    v.TextureID = ""
+                end
+            elseif v:IsA("SpecialMesh") then
+                v.TextureId = ""
+            elseif v:IsA("Decal") or v:IsA("Texture") then
+                v:Destroy()
+            elseif v:IsA("Clothing") or v:IsA("ShirtGraphic") then
+                v:Destroy()
+            elseif v:IsA("JointInstance") or v:IsA("TouchTransmitter") then
+                v:Destroy()
+            elseif v:IsA("Accessory") or v:IsA("Tool") then
+                if isNeon then
+                    v:Destroy()
+                else
+                    for _, accessoryPart in pairs(v:GetDescendants()) do
+                        if accessoryPart:IsA("BasePart") then
+                            accessoryPart.Material = Enum.Material.ForceField
+                            accessoryPart.Color = mainColor
+                            accessoryPart.CanCollide = false
+                            accessoryPart.Anchored = true
+                            if accessoryPart:IsA("MeshPart") then
+                                accessoryPart.TextureID = ""
+                            elseif accessoryPart:IsA("SpecialMesh") then
+                                accessoryPart.TextureId = ""
+                            end
+                        elseif accessoryPart:IsA("JointInstance") or accessoryPart:IsA("TouchTransmitter") then
+                            accessoryPart:Destroy()
+                        end
+                    end
+                end
+            elseif v:IsA("LocalScript") or v:IsA("Script") then
+                v:Destroy()
+            end
+        end
+        
+        local partsMap = {}
+        for _, v in pairs(targetChar:GetDescendants()) do
+            if v:IsA("BasePart") then
+                local clonePart = clone:FindFirstChild(v.Name, true) -- Recursive to be safe with accessories
+                if clonePart and clonePart:IsA("BasePart") and not partsMap[clonePart] then
+                    clonePart.CFrame = v.CFrame
+                    partsMap[clonePart] = true
+                end
+            end
+        end
+        
+        local lpChar = localplayer.Character
+        if lpChar and lpChar:FindFirstChild("HumanoidRootPart") then
+            local root = lpChar.HumanoidRootPart
+            clone:PivotTo(targetChar:GetPivot() + Vector3.new(root.CFrame.LookVector.X * 1.5, 0, root.CFrame.LookVector.Z * 1.5))
+        end
+        
+        clone.Parent = workspace.Terrain
+        targetChar.Archivable = false
+        game:GetService("Debris"):AddItem(clone, 2)
+
+    elseif effectType == "Pulse" then
+        local attachment = Instance.new("Attachment")
+        attachment.Parent = part
+        attachment.WorldPosition = part.Position
+        
+        local function createEmitter(name, orientation)
+            local p = Instance.new("ParticleEmitter")
+            p.Name = name
+            p.LightEmission = 3
+            p.Transparency = NumberSequence.new(0)
+            p.Color = ColorSequence.new(mainColor)
+            p.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 6, 1.2)})
+            p.Rotation = NumberRange.new(0)
+            p.RotSpeed = NumberRange.new(0)
+            p.Enabled = false
+            p.Rate = 2
+            p.Lifetime = NumberRange.new(0.25)
+            p.Speed = NumberRange.new(0.1)
+            p.Squash = NumberSequence.new(0)
+            p.ZOffset = 1
+            p.Texture = "rbxassetid://2916153928"
+            p.Orientation = orientation
+            p.Shape = Enum.ParticleEmitterShape.Box
+            p.ShapeInOut = Enum.ParticleEmitterShapeInOut.Outward
+            p.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
+            p.Parent = attachment
+            return p
+        end
+        
+        local p1 = createEmitter("Particle1", Enum.ParticleOrientation.VelocityPerpendicular)
+        local p2 = createEmitter("Particle2", Enum.ParticleOrientation.FacingCamera)
+        
+        p1:Emit(1)
+        p2:Emit(1)
+        
+        game:GetService("Debris"):AddItem(attachment, 1)
+
+    elseif effectType == "Impact" then 
+        local pulsePart = Instance.new("Part")
+        pulsePart.Name = "HitEffect_Impact"
+        pulsePart.Shape = Enum.PartType.Ball
+        pulsePart.Size = Vector3.new(1, 1, 1)
+        pulsePart.Position = part.Position
+        pulsePart.Anchored = true
+        pulsePart.CanCollide = false
+        pulsePart.CanTouch = false
+        pulsePart.CanQuery = false
+        pulsePart.Material = Enum.Material.Neon
+        pulsePart.Color = mainColor
+        pulsePart.Transparency = 0.5
+        pulsePart.Parent = workspace.Terrain -- Parent after anchored=true
+        local tween = game:GetService("TweenService"):Create(pulsePart, TweenInfo.new(0.4), {Transparency = 1, Size = Vector3.new(6, 6, 6)})
+        tween:Play()
+        tween.Completed:Connect(function() pulsePart:Destroy() end)
+    elseif effectType == "Fortnite" then
+        local dmgValue = damage or 0
+        local dmgText = tostring(math.floor(dmgValue))
+        local targetPart = part
+        if not targetPart or not targetPart.Parent then return end
+        
+        -- Smart Part Resolver for Drawing
+        if targetPart.Name == "FakeHitbox" then
+            targetPart = targetPart.Parent:FindFirstChild("Head") or targetPart.Parent:FindFirstChild("Torso") or targetPart.Parent:FindFirstChild("HumanoidRootPart") or targetPart
+        end
+
+        local startWorldPos = targetPart.Position + Vector3.new(math.random(-10, 10) / 10, 2, math.random(-10, 10) / 10)
+        local floatOffset = Vector3.new(math.random(-5, 5) / 10, 3, 0)
+        
+        -- Dual-label stacking for "Super Bold" look without being messy
+        local function createLabel()
+            local l = Drawing.new("Text")
+            l.Text = dmgText
+            l.Color = color
+            l.Center = true
+            l.Outline = true
+            l.OutlineColor = Color3.new(0, 0, 0)
+            l.Font = 2 -- Bold-ish Monospace
+            l.Visible = false
+            l.Transparency = 1
+            l.ZIndex = 20
+            return l
+        end
+        
+        local label1 = createLabel()
+        local label2 = createLabel()
+
+        task.spawn(function()
+            local startTime = tick()
+            local duration = 0.8
+            
+            while tick() - startTime < duration do
+                local elapsed = tick() - startTime
+                
+                -- Floating animation
+                local currentWorldPos = startWorldPos + (floatOffset * math.sin((elapsed / duration) * (math.pi / 2)))
+                local screenPos, onScreen = camera:WorldToViewportPoint(currentWorldPos)
+                
+                if onScreen then
+                    label1.Visible = true
+                    label2.Visible = true
+                    label1.Position = Vector2.new(screenPos.X, screenPos.Y)
+                    label2.Position = Vector2.new(screenPos.X + 0.5, screenPos.Y + 0.5) -- Tiny offset for boldness
+                    
+                    -- Dynamic Size for Sharpness
+                    local size = 45
+                    local trans = 1
+                    if elapsed < 0.1 then 
+                        size = 25 + (25 * (elapsed / 0.1)) -- Pop to 50
+                        trans = elapsed / 0.1
+                    elseif elapsed < 0.2 then
+                        size = 50 - (5 * ((elapsed - 0.1) / 0.1)) -- Settle at 45
+                    elseif elapsed > 0.5 then
+                        local fadeProgress = (elapsed - 0.5) / 0.3
+                        trans = 1 - fadeProgress
+                        size = 45 - (10 * fadeProgress)
+                    end
+                    
+                    label1.Size = size
+                    label2.Size = size
+                    label1.Transparency = trans
+                    label2.Transparency = trans
+                else
+                    label1.Visible = false
+                    label2.Visible = false
+                end
+                
+                runservice.RenderStepped:Wait()
+            end
+            label1.Visible = false
+            label2.Visible = false
+            label1:Remove()
+            label2:Remove()
+        end)
+    end;
+end;
+local LastHits = {}
+local function OnHit(targetPlayer, hitPart, damage)
+    if not targetPlayer then return end
+    
+    -- Smart Part Resolver: Detect FakeHitbox and find real part for logs/effects
+    if hitPart and hitPart.Name == "FakeHitbox" then
+        hitPart = hitPart.Parent:FindFirstChild("Head") or hitPart.Parent:FindFirstChild("Torso") or hitPart.Parent:FindFirstChild("HumanoidRootPart") or hitPart
+    end
+    local now = tick()
+    local hitId = tostring(targetPlayer.UserId) -- Debounce per character to prevent double hits on FakeHitbox + Real Parts
+    if LastHits[hitId] and now - LastHits[hitId] < 0.15 then return end
+    LastHits[hitId] = now
+
+    if not Toggles or not Toggles.HitDetectionEnabled or not Toggles.HitDetectionEnabled.Value then return end;
+    if Options.HitSound and Options.HitSound.Value ~= "None" then 
+        local volume = Options.HitSoundVolume and Options.HitSoundVolume.Value or 1;
+        HitDetectionImpl.PlaySound(Options.HitSound.Value, volume);
+    end;
+    if Options.HitEffects and Options.HitEffects.Value then 
+        local color = Options.HitEffectColor and Options.HitEffectColor.Value or Color3.new(1, 1, 1);
+        for effectType, enabled in pairs(Options.HitEffects.Value) do 
+            if enabled then 
+                task.spawn(function()
+                    HitDetectionImpl.CreateEffect(effectType, hitPart, color, damage)
+                end)
+            end;
+        end;
+    end;
+    if Toggles.HitLogs and Toggles.HitLogs.Value then
+        local headshot = hitPart and hitPart.Name == "Head"
+        local dmgText = string.format("%.0f", damage)
+        HitDetectionImpl.CreateLog("serenium.hvh | hit " .. targetPlayer.Name .. " for " .. dmgText .. " damage (" .. (headshot and "head" or hitPart.Name) .. ")")
+    end;
+end;
+
 -- game exploit setup
 local modules = { Name = {}, Id = {} };
 local utilityids = {};
@@ -658,7 +1049,9 @@ function framework:GetClosest(Distance, Priority, CheckFunction)
             Player.Character
             and Player.Character:FindFirstChild("HumanoidRootPart")
             and Player.Character:FindFirstChild("Humanoid")
-            and Player.Character.Humanoid.Health ~= 0
+            and Player.Character.Humanoid.Health > 0
+            and not Player.Character:GetAttribute("IsRagdolled")
+            and not Player.Character:GetAttribute("Downed")
             and not whitelisted(Player)
         then
             return true;
@@ -675,7 +1068,8 @@ function framework:GetClosest(Distance, Priority, CheckFunction)
         if Ignored and table.find(Ignored, v.Name) then
             continue;
         end;
-        if not CheckFunction(v) then
+        local checkSuccess, checkResult = pcall(CheckFunction, v)
+        if not checkSuccess or not checkResult then
             continue;
         end;
 		if Toggles.WhitelistFriends.Value and localplayer:IsFriendsWith(v.UserId) then
@@ -708,7 +1102,9 @@ function framework:GetClosest2(Distance, CheckFunction)
 			Player.Character
 			and Player.Character:FindFirstChild("HumanoidRootPart")
 			and Player.Character:FindFirstChild("Humanoid")
-			and Player.Character.Humanoid.Health ~= 0
+			and Player.Character.Humanoid.Health > 0
+            and not Player.Character:GetAttribute("IsRagdolled")
+            and not Player.Character:GetAttribute("Downed")
 			and not Player.Character:FindFirstChildOfClass("ForceField")
 			and not whitelisted(Player)
 		then
@@ -725,7 +1121,8 @@ function framework:GetClosest2(Distance, CheckFunction)
 		if v == localplayer then
 			continue;
 		end;
-		if not CheckFunction(v) then
+		local checkSuccess, checkResult = pcall(CheckFunction, v)
+		if not checkSuccess or not checkResult then
 			continue;
 		end;
 		if framework:InMenu(v) then
@@ -776,7 +1173,8 @@ function framework:GetClosestToMouse(Distance, Priority, CheckFunction)
 		if Toggles.WhitelistFriends.Value and localplayer:IsFriendsWith(v.UserId) then
 			continue;
 		end;
-		if not CheckFunction(v) then
+		local checkSuccess, checkResult = pcall(CheckFunction, v)
+		if not checkSuccess or not checkResult then
 			continue;
 		end;
 		if framework:InMenu(v) then
@@ -1036,36 +1434,47 @@ function framework:InMenu(Player)
 	return IsMenu;
 end;
 function framework:Check(Character)
-	if not Character or table.find(ParryingCharacters, Character) then
-		return;
-	end;
-	local Humanoid = Character:FindFirstChildOfClass("Humanoid");
-	local Player = players:GetPlayerFromCharacter(Character);
-	if Player then
-		local Rodux = framework:GetSessionData(Player);
-		if Rodux and Rodux:getState().parry.isParrying then
-			return;
+	local success, result = pcall(function()
+		if not Character or table.find(ParryingCharacters, Character) then
+			return false;
 		end;
-	end;
-	if Humanoid then
-		local Animator = Humanoid:FindFirstChild("Animator");
-		if Animator then
-			local PlayingAnimations = Animator:GetPlayingAnimationTracks();
-			for i, v in pairs(PlayingAnimations) do
-				if v.Animation.Name:match("Parry") then
-					return;
+		
+		-- Defensive check for valid Character model causing reported errors
+		if not Character.Parent then return false end
+
+		local Humanoid = Character:FindFirstChildOfClass("Humanoid");
+		local Player = players:GetPlayerFromCharacter(Character);
+		if Player then
+			local Rodux = framework:GetSessionData(Player);
+			if Rodux and Rodux:getState().parry.isParrying then
+				return false;
+			end;
+		end;
+		if Humanoid then
+			local Animator = Humanoid:FindFirstChild("Animator");
+			if Animator then
+				local PlayingAnimations = Animator:GetPlayingAnimationTracks();
+				for i, v in pairs(PlayingAnimations) do
+					if v.Animation.Name:match("Parry") then
+						return false;
+					end;
 				end;
 			end;
 		end;
-	end;
 
-	for i, v in pairs(Character:GetChildren()) do
-		if v:GetAttribute("ParryShieldId") and #v:GetChildren() == 1 then
-			return v:GetChildren()[1].Transparency == 1;
+		for i, v in pairs(Character:GetChildren()) do
+			if v:GetAttribute("ParryShieldId") and #v:GetChildren() == 1 then
+				return v:GetChildren()[1].Transparency == 1;
+			end;
 		end;
-	end;
 
-	return true;
+		return true;
+	end)
+	
+	if not success then
+		return false
+	end
+	return result
 end;
 function framework:WaitForDescendant(Root, Name, Condition, Timeout)
 	local Descendant = nil;
@@ -1252,16 +1661,69 @@ if modules.Name["RangedHitVisuals"] and modules.Name["RangedHitVisuals"].default
                     task.wait((hitcf.Position - part.Position).Magnitude / metadata.speed)
                 end
                 
-                newHitCf = part.CFrame
-                    * cosmetic.CFrame.Rotation
-                    * CFrame.new(
-                        math.random(-1,1) * (part.Size.X / 2),
-                        math.random(-1,1) * (part.Size.Y / 2),
-                        math.random(-1,1) * (part.Size.Z / 2)
-                    )
+                if part and part.Parent then
+                    hitpart = part
+                    newHitCf = part.CFrame
+                        * cosmetic.CFrame.Rotation
+                        * CFrame.new(
+                            math.random(-1,1) * (part.Size.X / 2),
+                            math.random(-1,1) * (part.Size.Y / 2),
+                            math.random(-1,1) * (part.Size.Z / 2)
+                        )
+                else
+                    return old(player, tool, cfg, hitpart, newHitCf, normal, material, cosmetic)
+                end
             end
         end
         
+        -- Global Enable Check
+        -- Only track LocalPlayer hits
+        pcall(function()
+            if player == localplayer then
+                local targetPlr = players:GetPlayerFromCharacter(hitpart.Parent)
+                if targetPlr then
+                    local function extract(c)
+                        if not c then return 0 end
+                        local d = c.damage or c.base_damage or c.baseDamage or c.max_damage or c.maxDamage or (c.stats and (c.stats.damage or c.stats.baseDamage)) or 0
+                        if typeof(d) == "table" then
+                            -- Smart part lookup with R15 to R6 mapping
+                            local pName = hitpart.Name
+                            local r6Name = pName:find("Torso") and "Torso" or (pName:find("Leg") and "Leg" or (pName:find("Arm") and "Arm" or pName))
+                            d = d[pName] or d[r6Name] or d.Head or d.Torso or d[1] or d.base or 0
+                        end
+                        if typeof(d) == "table" then d = d[1] or 0 end
+                        return typeof(d) == "number" and d or 0
+                    end
+
+                    local damage = extract(cfg)
+                    if damage <= 0 then
+                        -- Fallback to raw metadata if passed config yields no damage
+                        local rawMeta = framework:getmetadata(tool.Name)
+                        damage = extract(rawMeta and rawMeta._itemConfig or rawMeta)
+                    end
+
+                    -- Account for charge (Bows/Charged weapons)
+                    local _, currentMetadata = framework:GetRanged()
+                    local charge = 1
+                    if currentMetadata and currentMetadata._chargeProgressVO then
+                        local cVal = currentMetadata._chargeProgressVO.Value
+                        charge = (cVal and cVal > 0) and cVal or 1
+                    end
+                    damage = damage * charge
+
+                    if hitpart and hitpart.Name == "Head" then
+                         local multiplier = (cfg and (cfg.headshotMultiplier or cfg.headShotMultiplier or cfg.HeadshotMultiplier or cfg.head_shot_multiplier)) 
+                                         or (currentMetadata and currentMetadata._itemConfig and currentMetadata._itemConfig.headshotMultiplier) or 1.5
+                         damage = damage * multiplier
+                    end
+                    
+                    if damage > 0 then
+                        OnHit(targetPlr, hitpart, damage)
+                    end
+                end
+            end
+        end)
+
         return old(player, tool, cfg, hitpart, newHitCf, normal, material, cosmetic)
     end
 end
@@ -1293,7 +1755,7 @@ if network and network.FireServer then
 		local args = {...}
 		
 		if remoteName == "MeleeDamage" then
-			if Config.HitboxExpand and args[2] and args[2].Name == "FakeHitbox" then
+			if Config.HitboxExpand and args[2] and typeof(args[2]) == "Instance" and args[2].Name == "FakeHitbox" then
 				local part = args[2].Parent:FindFirstChild(
 					Config.HBEPart == "Random" and R6BodyParts[math.random(1, #R6BodyParts)] or Config.HBEPart
 				) or args[2].Parent:FindFirstChild("Torso")
@@ -1310,7 +1772,7 @@ if network and network.FireServer then
 		end
 		
 		if remoteName == "MeleeFinish" then
-			if Config.HitboxExpand and args[2] and args[2].Name == "FakeHitbox" then
+			if Config.HitboxExpand and args[2] and typeof(args[2]) == "Instance" and args[2].Name == "FakeHitbox" then
 				local part = args[2].Parent:FindFirstChild(
 					Config.HBEPart == "Random" and R6BodyParts[math.random(1, #R6BodyParts)] or Config.HBEPart
 				) or args[2].Parent:FindFirstChild("Torso")
@@ -1321,23 +1783,37 @@ if network and network.FireServer then
 			end
 		end
 		if remoteName == "RangedHit" then
-			if Config.HitboxExpand and args[2] and args[2].Name == "FakeHitbox" then
-				local part = args[2].Parent:FindFirstChild(
-					Config.HBEPart == "Random" and R6BodyParts[math.random(1, #R6BodyParts)] or Config.HBEPart
-				) or args[2].Parent:FindFirstChild("Torso")
-				
-				if part then
-					args[2] = part
-					args[4] = part.Position
-					args[5] = CFrame.Angles(args[5]:ToEulerAnglesYXZ()) * CFrame.new(
-						(math.random() * math.random(-1, 1)) * (part.Size.X / 2),
-						(math.random() * math.random(-1, 1)) * (part.Size.Y / 2),
-						(math.random() * math.random(-1, 1)) * (part.Size.Z / 2)
-					)
+			if Config.HitboxExpand and args[2] and typeof(args[2]) == "Instance" and args[2].Name == "FakeHitbox" then
+				if getgenv().ragebot then
+					-- Ragebot override: Force valid part and disable randomization
+					local realPart = args[2].Parent:FindFirstChild("Head") 
+									or args[2].Parent:FindFirstChild(Config.HBEPart) 
+									or args[2].Parent:FindFirstChild("Torso")
+					if realPart then
+						args[2] = realPart
+						if realPart.Name == "Head" then
+							args[4] = realPart.Position
+							args[5] = CFrame.new() -- Remove random offset
+						end
+					end
+				else 
+					local part = args[2].Parent:FindFirstChild(
+						Config.HBEPart == "Random" and R6BodyParts[math.random(1, #R6BodyParts)] or Config.HBEPart
+					) or args[2].Parent:FindFirstChild("Torso")
+					
+					if part then
+						args[2] = part
+						args[4] = part.Position
+						args[5] = CFrame.Angles(args[5]:ToEulerAnglesYXZ()) * CFrame.new(
+							(math.random() * math.random(-1, 1)) * (part.Size.X / 2),
+							(math.random() * math.random(-1, 1)) * (part.Size.Y / 2),
+							(math.random() * math.random(-1, 1)) * (part.Size.Z / 2)
+						)
+					end
 				end
 			end
 			
-			if getgenv().AlwaysHead and args[2] and args[2].Parent then
+			if (getgenv().AlwaysHead or getgenv().ragebot) and args[2] and typeof(args[2]) == "Instance" and args[2].Parent then
 				local head = args[2].Parent:FindFirstChild("Head")
 				if head then
 					args[2] = head
@@ -1345,7 +1821,7 @@ if network and network.FireServer then
 			end
 		end
 		if remoteName == "RangedExplode" then
-			if Config.HitboxExpand and args[2] and args[2].Name == "FakeHitbox" then
+			if Config.HitboxExpand and args[2] and typeof(args[2]) == "Instance" and args[2].Name == "FakeHitbox" then
 				local part = args[2].Parent:FindFirstChild(
 					Config.HBEPart == "Random" and R6BodyParts[math.random(1, #R6BodyParts)] or Config.HBEPart
 				) or args[2].Parent:FindFirstChild("Torso")
@@ -1361,7 +1837,7 @@ if network and network.FireServer then
 				end
 			end
 			
-			if getgenv().AlwaysHead and args[2] and args[2].Parent then
+			if getgenv().AlwaysHead and args[2] and typeof(args[2]) == "Instance" and args[2].Parent then
 				local head = args[2].Parent:FindFirstChild("Head")
 				if head then
 					args[2] = head
@@ -1943,29 +2419,26 @@ local function gethitpart(character)
 	if head then
 		return head;
 	end;
-	for _, inst in ipairs(character:GetChildren()) do
-		if inst:IsA("BasePart") then
-			return inst;
-		end;
+	local hrp = character:FindFirstChild("Torso");
+	if hrp then
+		return hrp;
 	end;
-	return character:FindFirstChild("HumanoidRootPart");
 end;
 function meleehitboxes(metadata)
-    if not metadata then return nil end
-    local success, result
-    local retries = 0
+    if not metadata then return nil; end;
+    local success, result;
+    local retries = 0;
     repeat
         success, result = pcall(function()
             return metadata.meleeHitboxes;
         end)
         if not success or result == nil then
             task.wait(0.05);
-            retries = retries + 1
-        end
-    until (success and result) or retries > 10
-
+            retries = retries + 1;
+        end;
+    until (success and result) or retries > 10;
     return result;
-end
+end;
 -- Combat Section
 framework:BindToRenderStep(function()
 	if getgenv().killaura and not KADebounce then
@@ -3071,18 +3544,33 @@ exploit:AddToggle("antifling", {
             getgenv().AntiFlingConnection:Disconnect();
             getgenv().AntiFlingConnection = nil;
         end;
+        if getgenv().AntiFlingConnections then
+            for _, c in pairs(getgenv().AntiFlingConnections) do pcall(function() c:Disconnect() end) end
+            getgenv().AntiFlingConnections = nil
+        end
+        
         if Value then
-            getgenv().AntiFlingConnection = runservice.Stepped:Connect(function()
-                for _, player in pairs(players:GetPlayers()) do
-                    if player ~= localplayer and player.Character then
-                        for _, v in pairs(player.Character:GetDescendants()) do
-                            if v:IsA("BasePart") then
-                                v.CanCollide = false
-                            end
-                        end
-                    end
+            getgenv().AntiFlingConnections = {}
+            local function disable(part)
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
                 end
-            end)
+            end
+            
+            local function registerChar(char)
+                for _, v in pairs(char:GetDescendants()) do disable(v) end
+                table.insert(getgenv().AntiFlingConnections, char.DescendantAdded:Connect(disable))
+            end
+            
+            local function registerPlayer(plr)
+                if plr ~= localplayer then
+                    if plr.Character then registerChar(plr.Character) end
+                    table.insert(getgenv().AntiFlingConnections, plr.CharacterAdded:Connect(registerChar))
+                end
+            end
+            
+            for _, plr in pairs(players:GetPlayers()) do registerPlayer(plr) end
+            table.insert(getgenv().AntiFlingConnections, players.PlayerAdded:Connect(registerPlayer))
         end
     end;
 });
@@ -4800,6 +5288,41 @@ lightingsection:AddToggle("ColorCorrection", {
 	Transparency = 0;
 });
 
+local hitdetectionsection = visuals:AddRightGroupbox("hit detection");
+hitdetectionsection:AddToggle("HitDetectionEnabled", {
+    Text = "enabled";
+    Default = false;
+}):AddColorPicker("HitEffectColor", {
+    Default = Color3.new(1, 1, 1);
+    Title = "effect color";
+});
+hitdetectionsection:AddDropdown("HitSound", {
+    Text = "hit sound";
+    Default = "None";
+    Values = {"None", "OSU", "Neverlose", "Bameware", "skeet", "Rust", "Lazer Beam", "Bow Hit", "TF2 Hitsound", "TF2 Critical"};
+});
+hitdetectionsection:AddDropdown("HitEffects", {
+    Multi = true;
+    Text = "hit effects";
+    Default = {};
+	Values = {"Clone (Forcefield)", "Clone (Neon)", "Impact", "Pulse", "Fortnite"};
+});
+hitdetectionsection:AddToggle("HitLogs", {
+    Text = "hitlogs";
+    Default = false;
+}):AddColorPicker("HvhColor", {
+    Default = Color3.fromRGB(150, 0, 255);
+    Title = ".hvh color";
+});
+hitdetectionsection:AddSlider("HitSoundVolume", {
+	Text = "hit sound volume";
+	Default = 1;
+	Min = 0.1;
+	Max = 10;
+	Rounding = 1;
+	Compact = true;
+});
+
 lightingsection:AddDropdown("Skybox", {
 	Text = "skybox";
 	Default = "None";
@@ -5333,49 +5856,56 @@ espsection:AddToggle("Beartrap", {
 
 local currentRagebotTarget = nil;
 
-local FOVCircleSilent = Drawing.new("Circle");
-local FOVCircleAimbot = Drawing.new("Circle");
-local FOVCircleVisuals = Drawing.new("Circle");
-local FOVCircleVisualsOutline = Drawing.new("Circle");
-local FOVCircleVisualsFill = Drawing.new("Circle");
+local FOVCircles = {
+	Silent = Drawing.new("Circle"),
+	Aimbot = Drawing.new("Circle"),
+	Visuals = Drawing.new("Circle"),
+	Outline = Drawing.new("Circle"),
+	Fill = Drawing.new("Circle")
+}
+local FOVCircleSilent = FOVCircles.Silent
+local FOVCircleAimbot = FOVCircles.Aimbot
+local FOVCircleVisuals = FOVCircles.Visuals
+local FOVCircleVisualsOutline = FOVCircles.Outline
+local FOVCircleVisualsFill = FOVCircles.Fill
 
-FOVCircleSilent.Visible = false;
-FOVCircleAimbot.Visible = false;
-FOVCircleVisuals.Visible = false;
-FOVCircleVisualsOutline.Visible = false;
-FOVCircleVisualsFill.Visible = false;
+FOVCircles.Silent.Visible = false;
+FOVCircles.Aimbot.Visible = false;
+FOVCircles.Visuals.Visible = false;
+FOVCircles.Outline.Visible = false;
+FOVCircles.Fill.Visible = false;
 
-FOVCircleSilent.Transparency = 1;
-FOVCircleAimbot.Transparency = 1;
-FOVCircleVisuals.Transparency = 1;
-FOVCircleVisualsOutline.Transparency = 1;
-FOVCircleVisualsFill.Transparency = 0.5;
+FOVCircles.Silent.Transparency = 1;
+FOVCircles.Aimbot.Transparency = 1;
+FOVCircles.Visuals.Transparency = 1;
+FOVCircles.Outline.Transparency = 1;
+FOVCircles.Fill.Transparency = 0.5;
 
-FOVCircleSilent.Color = Color3.new(1, 1, 1);
-FOVCircleAimbot.Color = Color3.new(1, 1, 1);
-FOVCircleVisuals.Color = Color3.new(1, 1, 1);
-FOVCircleVisualsOutline.Color = Color3.new(0, 0, 0);
-FOVCircleVisualsFill.Color = Color3.new(1, 1, 1);
+FOVCircles.Silent.Color = Color3.new(1, 1, 1);
+FOVCircles.Aimbot.Color = Color3.new(1, 1, 1);
+FOVCircles.Visuals.Color = Color3.new(1, 1, 1);
+FOVCircles.Outline.Color = Color3.new(0, 0, 0);
+FOVCircles.Fill.Color = Color3.new(1, 1, 1);
 
-FOVCircleSilent.Thickness = 1;
-FOVCircleAimbot.Thickness = 1;
-FOVCircleVisuals.Thickness = 1;
-FOVCircleVisualsOutline.Thickness = 0.1;
-FOVCircleVisualsFill.Thickness = 0;
+FOVCircles.Silent.Thickness = 1;
+FOVCircles.Aimbot.Thickness = 1;
+FOVCircles.Visuals.Thickness = 1;
+FOVCircles.Outline.Thickness = 0.1;
+FOVCircles.Fill.Thickness = 0;
 
-FOVCircleSilent.NumSides = 64;
-FOVCircleAimbot.NumSides = 64;
-FOVCircleVisuals.NumSides = 64;
-FOVCircleVisualsOutline.NumSides = 64;
-FOVCircleVisualsFill.NumSides = 64;
+FOVCircles.Silent.NumSides = 64;
+FOVCircles.Aimbot.NumSides = 64;
+FOVCircles.Visuals.NumSides = 64;
+FOVCircles.Outline.NumSides = 64;
+FOVCircles.Fill.NumSides = 64;
 
-FOVCircleVisualsFill.Filled = true;
+FOVCircles.Fill.Filled = true;
 
 local lastFOVCirclePos = userinputservice:GetMouseLocation()
 local currentFOVCircleSize = 50
-local globalRainbowColor = Color3.new(1,1,1)
+local globalRainbowColor = Color3.new(1,1,1);
 
-do
+local function InitializeESP() -- ESP/Visuals Scope (fixes register limit)
 	-- Add ESP entries to Classes table
 	if not Classes.ESP then
 		Classes.ESP = Toggles.ESP;
@@ -5432,6 +5962,13 @@ do
         Classes.FOVCircleOutlineColor = Options.FOVCircleOutlineColor;
         Classes.FOVCircleSmoothing = Options.FOVCircleSmoothing;
         Classes.FOVCircleSize = Options.FOVCircleSize;
+
+        Classes.HitDetectionEnabled = Toggles.HitDetectionEnabled;
+        Classes.HitSound = Options.HitSound;
+        Classes.HitEffects = Options.HitEffects;
+        Classes.HitLogs = Toggles.HitLogs;
+        Classes.HitEffectColor = Options.HitEffectColor;
+        Classes.HvhColor = Options.HvhColor;
 	end
 
 	-- ESP Variables
@@ -5486,18 +6023,20 @@ do
 
 	-- Animation tracking
 	local animations = {}
-	local blacklist = {
-		"rbxassetid://106649093705106",
-		"rbxassetid://6423003415",
-		"rbxassetid://101463478179793",
-	}
+	do
+		local blacklist = {
+			"rbxassetid://106649093705106",
+			"rbxassetid://6423003415",
+			"rbxassetid://101463478179793",
+		}
 
-	if modules.Name["WeaponMetadata"] then
-		for i, v in pairs(modules.Name["WeaponMetadata"]) do
-			if v.slashMetadata then
-				for _, data in pairs(v.slashMetadata) do
-					if data.animation and data.animation.AnimationId and not table.find(blacklist, data.animation.AnimationId) then
-						table.insert(animations, data.animation.AnimationId)
+		if modules.Name["WeaponMetadata"] then
+			for i, v in pairs(modules.Name["WeaponMetadata"]) do
+				if v.slashMetadata then
+					for _, data in pairs(v.slashMetadata) do
+						if data.animation and data.animation.AnimationId and not table.find(blacklist, data.animation.AnimationId) then
+							table.insert(animations, data.animation.AnimationId)
+						end
 					end
 				end
 			end
@@ -5860,26 +6399,36 @@ do
             FOVCircleVisualsOutline.Visible = false
             FOVCircleVisualsFill.Visible = false
         end
+
+        -- Hitlogs Performance Update (Redundant code removed as HitDetectionImpl takes care of its own rendering)
+
 	end));
 
 	framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function()
         local utilEnabled = Classes.UtilityESP.Value
 		for i, v in pairs(UtilityDrawings) do
 			if not v then continue end
-			for _, drawing in pairs(v) do
-				if typeof(drawing) == "table" and drawing.Visible ~= nil then
-					drawing.Visible = false
-				end
-			end
-			if not utilEnabled then continue end
+			
+			-- Always hide all drawings for this utility first (Defensive approach)
+			if v.Name then v.Name.Visible = false end
+			if v.Box then v.Box.Visible = false end
+			if v.BoxOutline then v.BoxOutline.Visible = false end
+			if v.Distance then v.Distance.Visible = false end
+
+			-- Skip if utility ESP is disabled or utility no longer exists
+			if not utilEnabled or not i or not i.Parent then continue end
 
 			local Root = i
-			local Distance = (camera.CFrame.Position - Root.Position).Magnitude
+			local RootPos = Root:IsA("Model") and (Root.PrimaryPart and Root.PrimaryPart.Position or Root:GetPivot().Position) or (Root:IsA("BasePart") and Root.Position or nil)
+            if not RootPos then continue end
+
+			local Distance = (camera.CFrame.Position - RootPos).Magnitude
 			if Classes.UtilityESPMaxDistance.Value < Distance then continue end
 
-			local Pos, OnScreen = camera:WorldToViewportPoint(Root.Position)
-			if OnScreen then
-				local Size = (camera:WorldToViewportPoint(Root.Position - Vector3.new(0, 3, 0)).Y - camera:WorldToViewportPoint(Root.Position + Vector3.new(0, 2.6, 0)).Y) / 2
+			local Pos, OnScreen = camera:WorldToViewportPoint(RootPos)
+			-- Only draw if on screen
+			if OnScreen and Pos.Z > 0 then
+				local Size = (camera:WorldToViewportPoint(RootPos - Vector3.new(0, 3, 0)).Y - camera:WorldToViewportPoint(RootPos + Vector3.new(0, 2.6, 0)).Y) / 2
 				local BoxSize = Vector2.new(math.floor(Size), math.floor(Size))
 				local BoxPos = Vector2.new(math.floor(Pos.X - Size / 2), math.floor(Pos.Y - Size / 2))
 				local Name = v.Name
@@ -6146,7 +6695,198 @@ do
 		end
 	end))
 end
+InitializeESP()
 
+-- Weapon Chams and Character Visuals Implementation
+local WeaponChamsData = {
+    OriginalProperties = {},
+    AppliedParts = {},
+    CurrentWeapon = nil,
+    WeaponHighlight = nil
+}
+
+local CharacterVisualsData = {
+    OriginalProperties = {},
+    OutlineGlow = nil,
+    RainbowConnection = nil
+}
+
+local function CleanupWeaponChams()
+    -- Remove highlight
+    if WeaponChamsData.WeaponHighlight then
+        pcall(function() WeaponChamsData.WeaponHighlight:Destroy() end)
+        WeaponChamsData.WeaponHighlight = nil
+    end
+    
+    -- Restore original properties for ALL tracked parts
+    for part, props in pairs(WeaponChamsData.OriginalProperties) do
+        if part and part.Parent then
+            pcall(function()
+                part.Material = props.Material
+                part.Color = props.Color
+                if props.Transparency then
+                    part.Transparency = props.Transparency
+                end
+                if props.TextureID and part:IsA("MeshPart") then
+                    part.TextureID = props.TextureID
+                end
+            end)
+        end
+    end
+    
+    -- Clear all tracking tables
+    WeaponChamsData.OriginalProperties = {}
+    WeaponChamsData.AppliedParts = {}
+    WeaponChamsData.CurrentWeapon = nil
+end
+
+local lastWeaponChamsMaterial = nil
+local lastWeaponChamsColor = nil
+
+local function ApplyWeaponChams(tool)
+    if not tool or not tool:IsA("Tool") then return end
+    if not Classes.WeaponChamsEnabled or not Classes.WeaponChamsEnabled.Value then 
+        CleanupWeaponChams()
+        return 
+    end
+    
+    local chamsMaterial = Classes.WeaponChamsMaterial and Classes.WeaponChamsMaterial.Value or "Plastic"
+    local chamsColor = Classes.WeaponChamsColor and Classes.WeaponChamsColor.Value or Color3.new(1, 0, 0)
+    
+    local highlightEnabled = Classes.WeaponChamsHighlight and Classes.WeaponChamsHighlight.Value or false
+    local highlightColor = Classes.WeaponChamsHighlightColor and Classes.WeaponChamsHighlightColor.Value or Color3.new(1, 0, 0)
+
+    -- Check if material, color, or highlight settings changed
+    local settingsChanged = (lastWeaponChamsMaterial ~= chamsMaterial) or 
+                             (lastWeaponChamsColor ~= chamsColor) or
+                             (lastWeaponChamsHighlight ~= highlightEnabled) or
+                             (lastWeaponChamsHighlightColor ~= highlightColor)
+    
+    -- Clean up and reapply if weapon changed OR settings changed
+    if WeaponChamsData.CurrentWeapon ~= tool or settingsChanged then
+        CleanupWeaponChams()
+        WeaponChamsData.CurrentWeapon = tool
+        lastWeaponChamsMaterial = chamsMaterial
+        lastWeaponChamsColor = chamsColor
+        lastWeaponChamsHighlight = highlightEnabled
+        lastWeaponChamsHighlightColor = highlightColor
+    end
+    
+    -- Apply to all parts in the tool
+    for _, part in pairs(tool:GetDescendants()) do
+        if part:IsA("BasePart") then
+            -- Store original properties if not already stored
+            if not WeaponChamsData.OriginalProperties[part] then
+                WeaponChamsData.OriginalProperties[part] = {
+                    Material = part.Material,
+                    Color = part.Color,
+                    Transparency = part.Transparency
+                }
+            end
+            
+            -- Apply chams
+            pcall(function()
+                if Enum.Material[chamsMaterial] then
+                    part.Material = Enum.Material[chamsMaterial]
+                else
+                    part.Material = Enum.Material.Plastic
+                end
+                part.Color = chamsColor
+                -- Optional: If it's a mesh, remove texture for better cham effect
+                if part:IsA("MeshPart") and part.TextureID ~= "" then
+                    if not WeaponChamsData.OriginalProperties[part].TextureID then
+                        WeaponChamsData.OriginalProperties[part].TextureID = part.TextureID
+                    end
+                    part.TextureID = ""
+                end
+            end)
+            
+            WeaponChamsData.AppliedParts[part] = true
+        end
+    end
+    
+    -- Apply highlight if enabled
+    if Classes.WeaponChamsHighlight and Classes.WeaponChamsHighlight.Value then
+        if not WeaponChamsData.WeaponHighlight or not WeaponChamsData.WeaponHighlight.Parent then
+            WeaponChamsData.WeaponHighlight = Instance.new("Highlight")
+            WeaponChamsData.WeaponHighlight.Name = "WeaponChams_Highlight"
+            WeaponChamsData.WeaponHighlight.FillTransparency = 0.5
+            WeaponChamsData.WeaponHighlight.OutlineTransparency = 0
+            WeaponChamsData.WeaponHighlight.Adornee = tool
+            WeaponChamsData.WeaponHighlight.Parent = tool
+        end
+        
+        local highlightColor = Classes.WeaponChamsHighlightColor and Classes.WeaponChamsHighlightColor.Value or Color3.new(1, 0, 0)
+        WeaponChamsData.WeaponHighlight.FillColor = highlightColor
+        WeaponChamsData.WeaponHighlight.OutlineColor = highlightColor
+    else
+        if WeaponChamsData.WeaponHighlight then
+            pcall(function() WeaponChamsData.WeaponHighlight:Destroy() end)
+            WeaponChamsData.WeaponHighlight = nil
+        end
+    end
+end
+
+local function CleanupCharacterVisuals()
+    -- Remove outline glow
+    if CharacterVisualsData.OutlineGlow then
+        pcall(function() CharacterVisualsData.OutlineGlow:Destroy() end)
+        CharacterVisualsData.OutlineGlow = nil
+    end
+    
+    -- Disconnect rainbow
+    if CharacterVisualsData.RainbowConnection then
+        CharacterVisualsData.RainbowConnection:Disconnect()
+        CharacterVisualsData.RainbowConnection = nil
+    end
+    
+    -- Restore original properties
+    for part, props in pairs(CharacterVisualsData.OriginalProperties) do
+        if part and part.Parent then
+            pcall(function()
+                part.Material = props.Material
+                part.Color = props.Color
+                part.Transparency = props.Transparency
+            end)
+        end
+    end
+    
+    CharacterVisualsData.OriginalProperties = {}
+end
+
+-- Character Visuals implementation moved to CreateCharacterVisuals for robustness
+
+-- Weapon Chams Rendering Loop
+local weaponChamsActive = false
+framework:BindToRenderStep(function()
+    if Classes.WeaponChamsEnabled and Classes.WeaponChamsEnabled.Value then
+        weaponChamsActive = true
+        local equippedTool = character and character:FindFirstChildOfClass("Tool")
+        if equippedTool then
+            ApplyWeaponChams(equippedTool)
+        else
+            CleanupWeaponChams()
+        end
+    else
+        if weaponChamsActive then
+            weaponChamsActive = false
+            CleanupWeaponChams()
+        end
+    end
+end)
+
+-- Consolidated into CreateCharacterVisuals loop below
+
+-- Cleanup on character change
+localplayer.CharacterAdded:Connect(function(newChar)
+    CleanupWeaponChams()
+    CleanupCharacterVisuals()
+    character = newChar
+    humanoidrootpart = newChar:WaitForChild("HumanoidRootPart")
+    humanoid = newChar:WaitForChild("Humanoid")
+end)
+
+local function InitializeCombat() -- Combat/Rage Scope (fixes register limit)
 -- ranged tab
 
 -- aimbot niggas
@@ -6523,11 +7263,6 @@ gunmods:AddToggle("AlwaysHead", {
 	end;
 });
 
-gunmods:AddDropdown("HitEffect", {
-	Text = "hit effect";
-	Default = "None";
-	Values = {"None", "Blackhole", "Bubble", "Flame", "Glow", "Ground Spiral", "Impact", "KO", "MLG", "Shock Bubble", "Shockwave", "Shockwave Explosion", "Slash", "Soul Slash", "Sparkles", "Sparks", "Spiral", "Spiral Slash", "Shine", "Summon", "Supernova", "Tornado", "Zzz"};
-});
 
 -- Add ranged to Classes table
 if not Classes.Aimbot then
@@ -6560,7 +7295,12 @@ if not Classes.Aimbot then
 	Classes.InfiniteRange = Toggles.InfiniteRange;
 	Classes.Wallbang = Toggles.Wallbang;
 	getgenv().AlwaysHead = Toggles.AlwaysHead;
-	Classes.HitEffect = Options.HitEffect;
+	Classes.HitDetectionEnabled = Toggles.HitDetectionEnabled;
+	Classes.HitLogs = Toggles.HitLogs;
+    Classes.HvhColor = Options.HvhColor;
+	Classes.HitSound = Options.HitSound;
+	Classes.HitEffects = Options.HitEffects;
+    Classes.HitEffectColor = Options.HitEffectColor;
 	getgenv().ragebot = Toggles.Ragebot;
 	Classes.ShowRageBotTarget = Toggles.ShowRageBotTarget;
 	Classes.RagebotDist = Options.RagebotDist;
@@ -6579,6 +7319,8 @@ function KalmanFilter.new()
 		q = 0.001, -- Process noise
 	}, KalmanFilter)
 end
+
+--// Hit Effects Logic
 function KalmanFilter:update(measured_pos, measured_vel, dt)
 	local predicted_x = self.x + self.v * dt + 0.5 * self.a * dt * dt
 	local predicted_v = self.v + self.a * dt
@@ -6615,31 +7357,82 @@ function PredictTargetPosition(origin, destination, weapon_speed, ping, gravity)
 
 	return future_pos
 end
+
+local HitDetection = {
+    ConnectedCasters = {},
+    ProcessedCasts = {},
+    LastCloneTime = {},
+}
+
+
+function HitDetection:ConnectToCaster(caster)
+    if not caster or self.ConnectedCasters[caster] then return end
+    self.ConnectedCasters[caster] = true
+    
+    caster.RayHit:Connect(function(cast, result)
+        if not Classes.HitDetectionEnabled.Value then return end
+        
+        -- Per-projectile debounce: only trigger effect once per bullet
+        if self.ProcessedCasts[cast] then return end
+        
+        -- Ownership Check: Verify this cast belongs to our current tool
+        local weapon = framework:GetRanged()
+        if not cast.UserData or cast.UserData.tool ~= weapon then return end
+        
+        local struckPart = result.Instance
+        local character = struckPart and struckPart.Parent
+        if character and character:FindFirstChildOfClass("Humanoid") then
+            local player = game.Players:GetPlayerFromCharacter(character)
+            if player and player ~= localplayer then
+                -- Mark cast as processed
+                self.ProcessedCasts[cast] = true
+                task.delay(5, function() self.ProcessedCasts[cast] = nil end)
+
+                -- Trigger unified hit detection
+                local _, metadata = framework:GetRanged()
+                local dCfg = metadata and metadata._itemConfig
+                local damage = dCfg and (dCfg.damage or dCfg.baseDamage or dCfg.base_damage or dCfg.maxDamage) or 0
+                if struckPart and struckPart.Name == "Head" and dCfg and dCfg.headshotMultiplier then
+                    damage = damage * dCfg.headshotMultiplier
+                end
+                -- Unified hit detection handled by defaultHit or Ragebot loop
+                -- We only use this for visual sync if needed
+                -- OnHit(player, struckPart, damage) -- Removed to prevent duplicates
+            end
+        end
+    end)
+end
+
 local Camera = workspace.CurrentCamera
+local SA_Logic = {
+    Cache = {},
+    ChanceCache = {},
+    CurrentTarget = nil,
+    OldSimulate = nil,
+    OldCalculateFire = nil
+}
+
 do -- Silent Aim
 	setthreadidentity(2)
 	local ActiveCast = require(repstorage.Shared.Vendor.FastCast.ActiveCast)
 	setthreadidentity(7)
 
-	local cache = {}
-	local chanceCache = {}
-	local currentSilentAimTarget = nil
-	local OldSimulateCast = getupvalue(ActiveCast.new, 6)
-	local OldCalculateFire = modules.Name["RangedWeaponHandler"].calculateFireDirection
+	SA_Logic.OldSimulate = getupvalue(ActiveCast.new, 6)
+	SA_Logic.OldCalculateFire = modules.Name["RangedWeaponHandler"].calculateFireDirection
+
 	function newSimulate(...)
 		local args = { ... }
 		local caster = args[1]
 
 		pcall(function()
 			local weapon, metadata = framework:GetRanged()
-
 			local Chance = framework:Chance(Classes.HitChance.Value)
 			if not Chance then
-				table.insert(chanceCache, caster)
+				table.insert(SA_Logic.ChanceCache, caster)
 			end
 
 			if
-				not table.find(chanceCache, caster)
+				not table.find(SA_Logic.ChanceCache, caster)
 				and Chance
 				and caster
 				and caster.UserData
@@ -6653,38 +7446,21 @@ do -- Silent Aim
 				if Classes.ClosestType.Value == "Only Redirect To Target" then
 					Player = nil
 					local Characters = framework:GetClosestCharactersToOrigin(caster:GetPosition(), 19)
-					if table.find(Characters, currentSilentAimTarget) then
-						Player = currentSilentAimTarget
+					if table.find(Characters, SA_Logic.CurrentTarget) then
+						Player = SA_Logic.CurrentTarget
 					end
 				end
 				
-				local MouseClosest = framework:GetClosestToMouse(Classes.FOVSize.Value)
-
-				if Player then
-					local Head = Player:FindFirstChild("Head")
-					local Character = LocalPlayer.Character
-					local HumanoidRootPart = Character and Character:FindFirstChild("HumanoidRootPart")
-					if getgenv().ragebot and Head and HumanoidRootPart then
-						caster.Caster.RayHit:Fire(caster, {
-							Distance = 1,
-							Instance = Head,
-							Material = Enum.Material.SmoothPlastic,
-							Position = Head.Position,
-							Normal = Vector3.yAxis,
-						}, nil, caster.RayInfo.CosmeticBulletObject)
-
-						caster:Terminate()
-					end
-				end
+				local MouseClosest = framework:GetClosestToMouse(Options.FOVSize.Value)
 			end
 		end)
 
 		if caster and caster.UserData and caster.StateInfo then
-			return OldSimulateCast(...)
+			return SA_Logic.OldSimulate(...)
 		end
-
 		return
 	end
+
 	function newCalculateFire(...)
 		local args = { ... }
 		local target = framework:GetClosestToMouse(Options.FOVSize.Value)
@@ -6698,17 +7474,15 @@ do -- Silent Aim
 			and framework:Chance(Classes.HitChance.Value)
 			and not framework:InMenu(target)
 		then
-
 			local hitPart = target.Character:FindFirstChild(Classes.SilentHitPart.Value)
 			local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
 			if hitPart and humanoid then
-				local cheatedOrigin =
-					metadata:getCheatedBackOriginIfInObject(metadata._mainCasterBehavior.RaycastParams)
+				local cheatedOrigin = metadata:getCheatedBackOriginIfInObject(metadata._mainCasterBehavior.RaycastParams)
 				local projectileSpeed = metadata._itemConfig.speed or 200
 				local projectileGravity = metadata._itemConfig.gravity or Vector3.new(0, 0, 0)
 
 				if cheatedOrigin and projectileSpeed and projectileGravity then
-					currentSilentAimTarget = target.Character
+					SA_Logic.CurrentTarget = target.Character
 					local predictedPos = PredictTargetPosition(cheatedOrigin, {
 						Position = hitPart.Position,
 						Velocity = (Classes.Resolver.Value and humanoid.MoveDirection or hitPart.Velocity),
@@ -6718,15 +7492,20 @@ do -- Silent Aim
 			end
 		end
 
-		return OldCalculateFire(unpack(args))
+		return SA_Logic.OldCalculateFire(unpack(args))
 	end
 
 	setupvalue(ActiveCast.new, 6, function(...)
     	local args = {...}
+        local casterObject = args[1]
+        if casterObject and casterObject.Caster then
+            HitDetection:ConnectToCaster(casterObject.Caster)
+        end
     	return newSimulate(unpack(args))
 	end)
 
 	modules.Name["RangedWeaponHandler"].calculateFireDirection = newCalculateFire
+end
 
 	local VisualizerFolder = Instance.new("Folder", game.Workspace.Terrain)
 	VisualizerFolder.Name = "FastCastVisualizationObjects"
@@ -6735,222 +7514,324 @@ do -- Silent Aim
 		local Debris = game:GetService("Debris")
 		Debris:AddItem(child, 0.7)
 	end)
-    local Activeragebot = true;
-	task.spawn(function()
-		while task.wait() do
-			if not Activeragebot then
-				break
-			end
+	task.spawn(LPH_NO_VIRTUALIZE(function()
+    while task.wait() do
+        local loopSuccess, loopErr = pcall(function()
+            if not Active then return end -- Using return to skip loop body in pcall
 
-			if not getgenv().ragebot then
-				continue
-			end
+            if not getgenv().ragebot then return end
 
-			local Character = localplayer.Character
-			if not Character then
-				continue
-			end
+            local Character = localplayer.Character
+            if not Character then return end
 
-			local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
-			if not HumanoidRootPart then
-				continue
-			end
+            local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
+            if not HumanoidRootPart then return end
 
-			local forcefield = Character:FindFirstChildOfClass("ForceField")
-			if forcefield and forcefield.Name ~= "ff" then
-				continue
-			end
+            local forcefield = Character:FindFirstChildOfClass("ForceField")
+            if forcefield and forcefield.Name ~= "ff" then return end
 
-			local ranged, metadata = framework:GetRanged()
-			if not ranged or not metadata then
-				continue
-			end
+            local ranged, metadata = framework:GetRanged()
+            if not ranged or not metadata then return end
 
-			local player = LockedTarget or framework:GetClosest2(Classes.RagebotDist.Value)
+            -- Ensure weapon state is initialized correctly if bot enabled while gun held
+            if metadata.canShootBulletssss == nil then
+                metadata.canShootBulletssss = true
+            end
 
-			if LockedTarget and not next(LockedTarget) then
-				LockedTarget = nil
-				continue
-			end
+            local isFlamethrower = ranged.Name == "Flamethrower" 
+                               or (ranged.Name and ranged.Name:find("Flame"))
 
-			if not player or not next(player) then
-				continue
-			end
+            local player = LockedTarget or framework:GetClosest2(Classes.RagebotDist.Value)
 
-			if metadata.canShootBulletssss == nil then
-				metadata.canShootBulletssss = true
-			end
+            if LockedTarget and not (player and next(player)) then
+                LockedTarget = nil
+                return
+            end
 
-			if metadata._clientAmmoVO.Value <= 0 then
-				network:FireServer("StartRangedReload", ranged)
-				task.wait(metadata._itemConfig.reloadTime - 0.2)
-				if ranged then
-					pcall(function()
-						local reloaded, _ = network:InvokeServer("FinishedRangedReload", ranged)
-						if reloaded then
-							metadata._clientAmmoVO.Value = metadata._itemConfig.maxAmmo
-							metadata.canShootBulletssss = true
-						end
-					end)
-				end
-				continue
-			end
+            if not player or not next(player) then return end
 
-			if not metadata.canShootBulletssss then
-				if metadata._itemConfig.maxAmmo == 1 then
-					metadata.canShootBulletssss = true
-				else
-					continue
-				end
-			end
+            -- Defensive Ammo Check
+            if metadata._clientAmmoVO and metadata._itemConfig and metadata._clientAmmoVO.Value <= 0 then
+                network:FireServer("StartRangedReload", ranged)
+                local reloadWait = (metadata._itemConfig.reloadTime or 2) - 0.2
+                task.wait(math.max(0, reloadWait))
+                if ranged then
+                    pcall(function()
+                        local reloaded, _ = network:InvokeServer("FinishedRangedReload", ranged)
+                        if reloaded and metadata._clientAmmoVO then
+                            metadata._clientAmmoVO.Value = metadata._itemConfig.maxAmmo or metadata._clientAmmoVO.Value
+                            metadata.canShootBulletssss = true
+                        end
+                    end)
+                end
+                return
+            end
 
-			if not metadata._mainCasterBehavior or not metadata._mainCaster then
-				continue
-			end
+            if metadata.canShootBulletssss == false then
+                if metadata._itemConfig and metadata._itemConfig.maxAmmo == 1 then
+                    metadata.canShootBulletssss = true
+                else
+                    return
+                end
+            end
 
-			local targetPlayer = players:FindFirstChild(next(player))
-			if not targetPlayer or not targetPlayer.Character then
-				continue
-			end
+            if not metadata._mainCasterBehavior or not metadata._mainCaster then return end
 
-			local targetHumanoid = targetPlayer.Character:FindFirstChild("Humanoid")
-			if not targetHumanoid or targetHumanoid.Health == 0 then
-				LockedTarget = nil
-				continue
-			end
+            local targetPlayer = players:FindFirstChild(next(player))
+            if not targetPlayer or not targetPlayer.Character then return end
 
-			if framework:InMenu(targetPlayer) then
-				LockedTarget = nil
-				continue
-			end
+            local targetHumanoid = targetPlayer.Character:FindFirstChild("Humanoid")
+            if not targetHumanoid or targetHumanoid.Health == 0 then
+                LockedTarget = nil
+                return
+            end
+            if framework:InMenu(targetPlayer) then
+                LockedTarget = nil
+                return
+            end
+            
+            -- Prevent targeting ragdolled/dead/downed players to avoid game-side VFX errors
+            if targetPlayer.Character:GetAttribute("IsRagdolled") or targetPlayer.Character:GetAttribute("Downed") then
+                LockedTarget = nil
+                return
+            end
 
-			local Head = targetPlayer.Character:FindFirstChild("Head")
-			if not Head or targetPlayer.Character:FindFirstChildOfClass("ForceField") then
-				LockedTarget = nil
-				continue
-			end
+            local Head = targetPlayer.Character:FindFirstChild("Head") 
+                       or targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not Head or targetPlayer.Character:FindFirstChildOfClass("ForceField") then
+                LockedTarget = nil
+                return
+            end
 
-			metadata.canShootBulletssss = false
+            local function safeReset()
+                if metadata then metadata.canShootBulletssss = true end
+            end
 
-			LockedTarget = player
+            local success, err = pcall(function()
+                metadata.canShootBulletssss = false
+                LockedTarget = player
+                
+                local itemConfig = metadata._itemConfig or {}
+                local projectileSpeed = itemConfig.speed or 200
+                local projectileGravity = itemConfig.gravity or Vector3.new(0, 0, 0)
+                local chargeValue = (metadata._chargeProgressVO and metadata._chargeProgressVO.Value and metadata._chargeProgressVO.Value > 0) and metadata._chargeProgressVO.Value or 1
 
-			metadata._mainCasterBehavior.RaycastParams.FilterDescendantsInstances = {
-				metadata._mainCasterBehavior.RaycastParams.FilterDescendantsInstances,
-				PlayerCharacters,
-				Map,
-				Workspace.Terrain,
-			}
+                if isFlamethrower then
+                    local params = metadata._mainCasterBehavior.RaycastParams
+                    local filter = params.FilterDescendantsInstances or {}
+                    local newFilter = table.clone(filter)
+                    if not table.find(newFilter, PlayerCharacters) then table.insert(newFilter, PlayerCharacters) end
+                    if not table.find(newFilter, Map) then table.insert(newFilter, Map) end
+                    if not table.find(newFilter, workspace.Terrain or workspace:FindFirstChildOfClass("Terrain")) then 
+                        table.insert(newFilter, workspace.Terrain) 
+                    end
+                    params.FilterDescendantsInstances = newFilter
 
-			local origin = metadata:getCheatedBackOriginIfInObject(metadata._mainCasterBehavior.RaycastParams)
-			local projectileSpeed = metadata._itemConfig.speed or 200
-			local projectileGravity = metadata._itemConfig.gravity or Vector3.new(0, 0, 0)
+                    local origin = metadata:getCheatedBackOriginIfInObject(params)
 
-			local finalPos = PredictTargetPosition(
-				origin,
-				{ Position = Head.Position, Velocity = Head.Velocity },
-				projectileSpeed,
-				LocalPlayer:GetNetworkPing() * 1000,
-				projectileGravity
-			)
+                    local finalPos = PredictTargetPosition(
+                        origin,
+                        { Position = Head.Position, Velocity = Head.Velocity or Vector3.zero },
+                        projectileSpeed,
+                        LocalPlayer:GetNetworkPing() * 1000,
+                        projectileGravity
+                    )
 
-			local CF = CFrame.new(Vector3.new(), (finalPos - origin).Unit)
-			local dir = OldCalculateFire(CF, 0, 0, 5000)
+                    local CF = CFrame.new(Vector3.new(), (finalPos - origin).Unit)
+                    local dir = SA_Logic.OldCalculateFire(CF, 0, 0, 5000)
 
-			local fakeBehavior = {
-				RaycastParams = metadata._mainCasterBehavior.RaycastParams,
-				Acceleration = Vector3.new(),
-				MaxDistance = 5000,
-				HighFidelityBehavior = 1,
-				HighFidelitySegmentSize = 0.5,
-				CosmeticBulletContainer = EffectsJunk,
-				AutoIgnoreContainer = true,
-			}
+                    local fakeBehavior = {
+                        RaycastParams = params,
+                        Acceleration = Vector3.new(),
+                        MaxDistance = 5000,
+                        HighFidelityBehavior = 1,
+                        HighFidelitySegmentSize = 0.5,
+                        CosmeticBulletContainer = EffectsJunk,
+                        AutoIgnoreContainer = true,
+                    }
 
-			local template = metadata._cosmeticProjectileTemplate
-			if typeof(fakeBehavior) == "Instance" then
-				fakeBehavior.CosmeticBulletProvider = nil
-				fakeBehavior.CosmeticBulletTemplate = template
-			else
-				fakeBehavior.CosmeticBulletProvider = template
-				fakeBehavior.CosmeticBulletTemplate = nil
-			end
+                    local template = metadata._cosmeticProjectileTemplate
+                    if typeof(fakeBehavior) == "Instance" then
+                        fakeBehavior.CosmeticBulletProvider = nil
+                        fakeBehavior.CosmeticBulletTemplate = template
+                    else
+                        fakeBehavior.CosmeticBulletProvider = template
+                        fakeBehavior.CosmeticBulletTemplate = nil
+                    end
 
-			local cast = metadata._mainCaster:Fire(origin, dir, projectileSpeed, fakeBehavior)
-			metadata._cheatId = metadata._cheatId and metadata._cheatId + 1 or 1
-			cast.UserData = {
-				["player"] = LocalPlayer,
-				["tool"] = ranged,
-				["shotId"] = tostring(metadata._cheatId),
-				["origin"] = origin,
-				["chargePercentage"] = metadata._chargeProgressVO.Value,
-			}
+                    local cast = metadata._mainCaster:Fire(origin, dir, projectileSpeed, fakeBehavior)
+                    metadata._cheatId = (metadata._cheatId or 0) + 1
+                    cast.UserData = {
+                        ["player"] = LocalPlayer,
+                        ["tool"] = ranged,
+                        ["shotId"] = tostring(metadata._cheatId),
+                        ["origin"] = origin,
+                        ["chargePercentage"] = chargeValue,
+                    }
+                    network:FireServer("RangedHit", ranged, origin,
+                        { [tostring(metadata._cheatId)] = dir.Unit },
+                        { [tostring(metadata._cheatId)] = dir },
+                        { [1] = tostring(metadata._cheatId) },
+                        nil,
+                        Camera.CFrame,
+                        Workspace:GetServerTimeNow(),
+                        chargeValue
+                    )
+                    
+                    -- Trigger hit detection
+                    local damage = (itemConfig.damage or itemConfig.baseDamage or itemConfig.base_damage or itemConfig.maxDamage or itemConfig.max_damage or 0)
+                    if typeof(damage) == "table" then
+                        damage = damage[Head.Name] or damage.Head or damage[1] or damage.base or 0
+                    end
+                    
+                    damage = damage * chargeValue
 
-			network:FireServer("RangedFire", ranged, origin, {
-				[tostring(metadata._cheatId)] = dir.Unit,
-			}, {
-				[tostring(metadata._cheatId)] = dir,
-			}, {
-				[1] = tostring(metadata._cheatId),
-			}, nil, Camera.CFrame, Workspace:GetServerTimeNow(), metadata._chargeProgressVO.Value)
-			metadata._clientAmmoVO.Value = metadata._clientAmmoVO.Value - 1
+                    if Head and Head.Name == "Head" then
+                         local multiplier = itemConfig.headshotMultiplier or itemConfig.headShotMultiplier or 1.5
+                         damage = damage * multiplier
+                    end
+                    OnHit(targetPlayer, Head, damage)
+                    
+                    if metadata._clientAmmoVO then
+                        metadata._clientAmmoVO.Value = math.max(0, metadata._clientAmmoVO.Value - 1)
+                    end
+                    task.wait(0.06 + math.random() * 0.04)
+                    metadata.canShootBulletssss = true
+                else
+                    local params = metadata._mainCasterBehavior.RaycastParams
+                    local filter = params.FilterDescendantsInstances or {}
+                    local newFilter = table.clone(filter)
+                    if not table.find(newFilter, PlayerCharacters) then table.insert(newFilter, PlayerCharacters) end
+                    if not table.find(newFilter, Map) then table.insert(newFilter, Map) end
+                    params.FilterDescendantsInstances = newFilter
 
-			local distance = (origin - Head.Position).Magnitude
-			local timeToHit = distance / projectileSpeed
+                    local origin = metadata:getCheatedBackOriginIfInObject(params)
 
-			if not (ranged.Name == "Longbow" or ranged.Name == "Crossbow" or ranged.Name == "Heavy Bow") then
-				task.delay(timeToHit + 0.08, function()
-					if cast.UserData and cast.StateInfo and cast.StateInfo.UpdateConnection then
-						if Toggles.ShowLine.Value then
-							local part = Instance.new("Part")
-							part.Anchored = true
-							part.CanCollide = false
-							part.Material = Enum.Material.Neon
-							part.Color = Options.linecolor.Value
-							part.Size = Vector3.new(0.1, 0.1, (Head.Position - HumanoidRootPart.Position).Magnitude)
-							part.CFrame = CFrame.new(HumanoidRootPart.Position, Head.Position)
-								* CFrame.new(0, 0, -part.Size.Z / 2)
-							part.Transparency = 0
-							part.Parent = workspace
-							task.spawn(function()
-								local fadeTime = 2
-								local steps = 30
-								for i = 1, steps do
-									part.Transparency = i / steps
-									task.wait(fadeTime / steps)
-								end
-								part:Destroy()
-							end)
-						end
-						metadata._mainCaster.RayHit:Fire(cast, {
-							Distance = 1,
-							Instance = Head,
-							Material = Enum.Material.SmoothPlastic,
-							Position = Head.Position,
-							Normal = Vector3.yAxis,
-						}, nil, cast.RayInfo.CosmeticBulletObject)
-						cast:Terminate()
-					end
-				end)
-			end
-			task.wait(metadata._itemConfig.cooldown)
+                    local finalPos = PredictTargetPosition(
+                        origin,
+                        { Position = Head.Position, Velocity = Head.Velocity or Vector3.zero },
+                        projectileSpeed,
+                        LocalPlayer:GetNetworkPing() * 1000,
+                        projectileGravity
+                    )
 
-			if metadata._clientAmmoVO.Value <= 0 then
-				network:FireServer("StartRangedReload", ranged)
-				task.wait(metadata._itemConfig.reloadTime - 0.2)
+                    local CF = CFrame.new(Vector3.new(), (finalPos - origin).Unit)
+                    local dir = SA_Logic.OldCalculateFire(CF, 0, 0, 5000)
 
-				if ranged then
-					pcall(function()
-						local reloaded, _ = network:InvokeServer("FinishedRangedReload", ranged)
-						if reloaded then
-							metadata._clientAmmoVO.Value = metadata._itemConfig.maxAmmo
-						end
-					end)
-				end
-			end
-			metadata.canShootBulletssss = true
-		end
-	end)
-end
+                    local fakeBehavior = {
+                        RaycastParams = params,
+                        Acceleration = Vector3.new(),
+                        MaxDistance = 5000,
+                        HighFidelityBehavior = 1,
+                        HighFidelitySegmentSize = 0.5,
+                        CosmeticBulletContainer = EffectsJunk,
+                        AutoIgnoreContainer = true,
+                    }
+
+                    local template = metadata._cosmeticProjectileTemplate
+                    if typeof(fakeBehavior) == "Instance" then
+                        fakeBehavior.CosmeticBulletProvider = nil
+                        fakeBehavior.CosmeticBulletTemplate = template
+                    else
+                        fakeBehavior.CosmeticBulletProvider = template
+                        fakeBehavior.CosmeticBulletTemplate = nil
+                    end
+
+                    local cast = metadata._mainCaster:Fire(origin, dir, projectileSpeed, fakeBehavior)
+                    metadata._cheatId = (metadata._cheatId or 0) + 1
+                    cast.UserData = {
+                        ["player"] = LocalPlayer,
+                        ["tool"] = ranged,
+                        ["shotId"] = tostring(metadata._cheatId),
+                        ["origin"] = origin,
+                        ["chargePercentage"] = chargeValue,
+                    }
+
+                    network:FireServer("RangedFire", ranged, origin,
+                        { [tostring(metadata._cheatId)] = dir.Unit },
+                        { [tostring(metadata._cheatId)] = dir },
+                        { [1] = tostring(metadata._cheatId) },
+                        nil,
+                        Camera.CFrame,
+                        Workspace:GetServerTimeNow(),
+                        chargeValue
+                    )
+
+                    if metadata._clientAmmoVO then
+                        metadata._clientAmmoVO.Value = math.max(0, metadata._clientAmmoVO.Value - 1)
+                    end
+
+                    local distance = (origin - Head.Position).Magnitude
+                    local timeToHit = distance / projectileSpeed
+
+                    if not (ranged.Name == "Longbow" or ranged.Name == "Crossbow" or ranged.Name == "Heavy Bow") then
+                        task.delay(timeToHit + 0.08, function()
+                            if cast and cast.UserData and metadata and metadata._mainCaster then
+                                if Toggles.ShowLine and Toggles.ShowLine.Value then
+                                    local part = Instance.new("Part")
+                                    part.Anchored = true
+                                    part.CanCollide = false
+                                    part.Material = Enum.Material.Neon
+                                    part.Color = (Options.linecolor and Options.linecolor.Value) or Color3.new(1,1,1)
+                                    part.Size = Vector3.new(0.1, 0.1, (Head.Position - HumanoidRootPart.Position).Magnitude)
+                                    part.CFrame = CFrame.new(HumanoidRootPart.Position, Head.Position) * CFrame.new(0, 0, -part.Size.Z / 2)
+                                    part.Transparency = 0
+                                    part.Parent = workspace
+                                    task.spawn(function()
+                                        local fadeTime = 2
+                                        local steps = 30
+                                        for i = 1, steps do
+                                            part.Transparency = i / steps
+                                            task.wait(fadeTime / steps)
+                                        end
+                                        part:Destroy()
+                                    end)
+                                end
+
+                                metadata._mainCaster.RayHit:Fire(cast, {
+                                    Distance = 1,
+                                    Instance = Head,
+                                    Material = Enum.Material.SmoothPlastic,
+                                    Position = Head.Position,
+                                    Normal = Vector3.yAxis,
+                                }, nil, cast.RayInfo and cast.RayInfo.CosmeticBulletObject or nil)
+                                
+                                -- Trigger hit detection
+                                local damage = (itemConfig.damage or itemConfig.baseDamage or itemConfig.base_damage or itemConfig.maxDamage or itemConfig.max_damage or 0)
+                                if typeof(damage) == "table" then
+                                    damage = damage[Head.Name] or damage.Head or damage[1] or damage.base or 0
+                                end
+                                
+                                damage = damage * chargeValue
+
+                                if Head and Head.Name == "Head" then
+                                    local multiplier = itemConfig.headshotMultiplier or itemConfig.headShotMultiplier or 1.5
+                                    damage = damage * multiplier
+                                end
+                                OnHit(targetPlayer, Head, damage)
+                                
+                                cast:Terminate()
+                            end
+                        end)
+                    end
+                    task.wait(itemConfig.cooldown or 0.1)
+                    metadata.canShootBulletssss = true
+                end
+            end)
+
+            if not success then
+                warn("serenium.error (ragebot inner): " .. tostring(err))
+            end
+        end)
+
+        if not loopSuccess then
+            warn("serenium.error (ragebot loop): " .. tostring(loopErr))
+            task.wait(1)
+        end
+
+        if not Active then break end
+    end
+end))
 local snipertext = "";
 local status = sniper:AddLabel("status: idle")
 sniper:AddInput("sniper", {
@@ -7413,66 +8294,12 @@ local function CreateMoreVisuals()
             chLine1.Visible = false; chLine2.Visible = false; chLine3.Visible = false; chLine4.Visible = false
             chOut1.Visible = false; chOut2.Visible = false; chOut3.Visible = false; chOut4.Visible = false
         end
-
-        -- Weapon Chams
-        if Classes.WeaponChamsEnabled and Classes.WeaponChamsEnabled.Value then
-            local char = localplayer.Character
-            local tool = char and char:FindFirstChildOfClass("Tool")
-            if tool and tool:IsDescendantOf(char) then
-                local chamColor = Classes.WeaponChamsColor and Classes.WeaponChamsColor.Value or Color3.new(1,0,0)
-                local highEnabled = Classes.WeaponChamsHighlight and Classes.WeaponChamsHighlight.Value
-                local highColor = Classes.WeaponChamsHighlightColor and Classes.WeaponChamsHighlightColor.Value or chamColor
-                local mat = Classes.WeaponChamsMaterial and Classes.WeaponChamsMaterial.Value
-                
-                -- Optimization: Only update if tool or settings changed
-                local settingsChanged = lastTool ~= tool or 
-                                       lastChamSettings.Material ~= mat or 
-                                       lastChamSettings.Color ~= chamColor or 
-                                       lastChamSettings.Highlight ~= highEnabled or
-                                       lastChamSettings.HighlightColor ~= highColor
-
-                if settingsChanged then
-                    lastTool = tool
-                    lastChamSettings = { Material = mat, Color = chamColor, Highlight = highEnabled, HighlightColor = highColor }
-
-                    if highEnabled then
-                        weaponHighlight.Enabled = true
-                        weaponHighlight.Parent = tool
-                        weaponHighlight.FillColor = highColor
-                        weaponHighlight.OutlineColor = highColor
-                        weaponHighlight.FillTransparency = 0.5
-                        weaponHighlight.OutlineTransparency = 0
-                    else
-                        weaponHighlight.Enabled = false
-                        weaponHighlight.Parent = nil
-                    end
-                    
-                    if mat then
-                        for _, part in ipairs(tool:GetDescendants()) do
-                            if part:IsA("BasePart") then
-                                part.Material = Enum.Material[mat]
-                                if mat == "Neon" then
-                                    part.Color = chamColor
-                                end
-                            end
-                        end
-                    end
-                end
-            else
-                if lastTool ~= nil then
-                    weaponHighlight.Enabled = false
-                    weaponHighlight.Parent = nil
-                    lastTool = nil
-                end
-            end
-        elseif lastTool ~= nil then
-            weaponHighlight.Enabled = false
-            weaponHighlight.Parent = nil
-            lastTool = nil
-        end
     end)
 end
 
 task.spawn(CreateCharacterVisuals)
 task.spawn(CreateMoreVisuals)
+end
+InitializeCombat()
+
 thememanager:ApplyToTab(tabs.settings);
