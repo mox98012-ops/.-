@@ -1,6 +1,30 @@
 game:GetService("Players").LocalPlayer:WaitForChild("CharacterLoaded");
 game:GetService("Players").LocalPlayer:WaitForChild("DataLoadedClient");
 game:GetService("Players").LocalPlayer:WaitForChild("DataLoaded");
+local allowselfkick = true;
+local mt = getrawmetatable(game);
+setreadonly(mt, false);
+local oldNamecall = mt.__namecall;
+local oldIndex = mt.__index;
+mt.__namecall = newcclosure(function(self, ...)
+    local method = getnamecallmethod();
+    if method == "Kick" then
+        if not checkcaller() then
+            return;
+        end;
+        if not allowselfkick then
+            return;
+        end;
+    end;
+    return oldNamecall(self, ...);
+end);
+mt.__index = newcclosure(function(self, key)
+    if key == "Kick" and not checkcaller() then
+        return;
+    end;
+    return oldIndex(self, key);
+end);
+setreadonly(mt, true);
 if getgenv().serenium_LOADED then
 	return;
 end;
@@ -7488,22 +7512,25 @@ do -- Silent Aim
 	local ActiveCast = require(repstorage.Shared.Vendor.FastCast.ActiveCast)
 	setthreadidentity(7)
 
-	SA_Logic.OldSimulate = getupvalue(ActiveCast.new, 6)
-	SA_Logic.OldCalculateFire = modules.Name["RangedWeaponHandler"].calculateFireDirection
-
+	local cache = {}
+	local chanceCache = {}
+	local currentSilentAimTarget = nil
+	local OldSimulateCast = getupvalue(ActiveCast.new, 6)
+	local OldCalculateFire = modules.Name["RangedWeaponHandler"].calculateFireDirection
 	function newSimulate(...)
 		local args = { ... }
 		local caster = args[1]
 
 		pcall(function()
 			local weapon, metadata = framework:GetRanged()
+
 			local Chance = framework:Chance(Classes.HitChance.Value)
 			if not Chance then
-				table.insert(SA_Logic.ChanceCache, caster)
+				table.insert(chanceCache, caster)
 			end
 
 			if
-				not table.find(SA_Logic.ChanceCache, caster)
+				not table.find(chanceCache, caster)
 				and Chance
 				and caster
 				and caster.UserData
@@ -7517,21 +7544,38 @@ do -- Silent Aim
 				if Classes.ClosestType.Value == "Only Redirect To Target" then
 					Player = nil
 					local Characters = framework:GetClosestCharactersToOrigin(caster:GetPosition(), 19)
-					if table.find(Characters, SA_Logic.CurrentTarget) then
-						Player = SA_Logic.CurrentTarget
+					if table.find(Characters, currentSilentAimTarget) then
+						Player = currentSilentAimTarget
 					end
 				end
 				
-				local MouseClosest = framework:GetClosestToMouse(Options.FOVSize.Value)
+				local MouseClosest = framework:GetClosestToMouse(Classes.FOVSize.Value)
+
+				if Player then
+					local Head = gethitpart(Player);
+					local Character = LocalPlayer.Character
+					local HumanoidRootPart = Character and Character:FindFirstChild("HumanoidRootPart")
+					if getgenv().ragebot and Head and HumanoidRootPart then
+						caster.Caster.RayHit:Fire(caster, {
+							Distance = 1,
+							Instance = Head,
+							Material = Enum.Material.SmoothPlastic,
+							Position = Head.Position,
+							Normal = Vector3.yAxis,
+						}, nil, caster.RayInfo.CosmeticBulletObject)
+
+						caster:Terminate()
+					end
+				end
 			end
 		end)
 
 		if caster and caster.UserData and caster.StateInfo then
-			return SA_Logic.OldSimulate(...)
+			return OldSimulateCast(...)
 		end
+
 		return
 	end
-
 	function newCalculateFire(...)
 		local args = { ... }
 		local target = framework:GetClosestToMouse(Options.FOVSize.Value)
@@ -7545,38 +7589,47 @@ do -- Silent Aim
 			and framework:Chance(Classes.HitChance.Value)
 			and not framework:InMenu(target)
 		then
-			local hitPart = target.Character:FindFirstChild(Classes.SilentHitPart.Value)
+
+			local targetCharacter = target.Character
+			local hitPart
+			if targetCharacter then
+				local preferred = Classes.SilentHitPart.Value
+    			local part = targetCharacter:FindFirstChild(preferred)
+    			if part then
+        			hitPart = part
+    			elseif preferred == "Head" then
+        			hitPart = gethitpart(targetCharacter)
+    			else
+        			hitPart = nil
+    			end
+			end
 			local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
 			if hitPart and humanoid then
-				local cheatedOrigin = metadata:getCheatedBackOriginIfInObject(metadata._mainCasterBehavior.RaycastParams)
+				local cheatedOrigin =
+					metadata:getCheatedBackOriginIfInObject(metadata._mainCasterBehavior.RaycastParams)
 				local projectileSpeed = metadata._itemConfig.speed or 200
 				local projectileGravity = metadata._itemConfig.gravity or Vector3.new(0, 0, 0)
 
 				if cheatedOrigin and projectileSpeed and projectileGravity then
-					SA_Logic.CurrentTarget = target.Character
+					currentSilentAimTarget = target.Character
 					local predictedPos = PredictTargetPosition(cheatedOrigin, {
 						Position = hitPart.Position,
 						Velocity = (Classes.Resolver.Value and humanoid.MoveDirection or hitPart.Velocity),
-					}, projectileSpeed, LocalPlayer:GetNetworkPing() * 1000, projectileGravity)
+					}, projectileSpeed, localplayer:GetNetworkPing() * 1000, projectileGravity)
 					args[1] = CFrame.lookAt(Vector3.new(), (predictedPos - cheatedOrigin).Unit)
 				end
 			end
 		end
 
-		return SA_Logic.OldCalculateFire(unpack(args))
+		return OldCalculateFire(unpack(args))
 	end
 
 	setupvalue(ActiveCast.new, 6, function(...)
     	local args = {...}
-        local casterObject = args[1]
-        if casterObject and casterObject.Caster then
-            HitDetection:ConnectToCaster(casterObject.Caster)
-        end
     	return newSimulate(unpack(args))
 	end)
 
 	modules.Name["RangedWeaponHandler"].calculateFireDirection = newCalculateFire
-end
 
 	local VisualizerFolder = Instance.new("Folder", game.Workspace.Terrain)
 	VisualizerFolder.Name = "FastCastVisualizationObjects"
@@ -7585,324 +7638,233 @@ end
 		local Debris = game:GetService("Debris")
 		Debris:AddItem(child, 0.7)
 	end)
-	task.spawn(LPH_NO_VIRTUALIZE(function()
-    while task.wait() do
-        local loopSuccess, loopErr = pcall(function()
-            if not Active then return end -- Using return to skip loop body in pcall
+	local ragebotactive = true;
 
-            if not getgenv().ragebot then return end
+	task.spawn(function()
+		while task.wait() do
+			if not ragebotactive then
+				break;
+			end;
 
-            local Character = localplayer.Character
-            if not Character then return end
+			if not getgenv().ragebot then
+				continue;
+			end;
 
-            local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
-            if not HumanoidRootPart then return end
+			local Character = localplayer.Character;
+			if not Character then
+				continue;
+			end;
 
-            local forcefield = Character:FindFirstChildOfClass("ForceField")
-            if forcefield and forcefield.Name ~= "ff" then return end
+			local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart");
+			if not HumanoidRootPart then
+				continue;
+			end;
 
-            local ranged, metadata = framework:GetRanged()
-            if not ranged or not metadata then return end
+			local forcefield = Character:FindFirstChildOfClass("ForceField");
+			if forcefield and forcefield.Name ~= "ff" then
+				continue;
+			end;
 
-            -- Ensure weapon state is initialized correctly if bot enabled while gun held
-            if metadata.canShootBulletssss == nil then
-                metadata.canShootBulletssss = true
-            end
+			local ranged, metadata = framework:GetRanged();
+			if not ranged or not metadata then
+				continue;
+			end;
 
-            local isFlamethrower = ranged.Name == "Flamethrower" 
-                               or (ranged.Name and ranged.Name:find("Flame"))
+			local player = LockedTarget or framework:GetClosest2(Classes.RagebotDist.Value);
 
-            local player = LockedTarget or framework:GetClosest2(Classes.RagebotDist.Value)
+			if LockedTarget and not next(LockedTarget) then
+				LockedTarget = nil;
+				continue;
+			end;
 
-            if LockedTarget and not (player and next(player)) then
-                LockedTarget = nil
-                return
-            end
+			if not player or not next(player) then
+				continue;
+			end;
 
-            if not player or not next(player) then return end
+			if metadata.canShootBulletssss == nil then
+				metadata.canShootBulletssss = true;
+			end;
 
-            -- Defensive Ammo Check
-            if metadata._clientAmmoVO and metadata._itemConfig and metadata._clientAmmoVO.Value <= 0 then
-                network:FireServer("StartRangedReload", ranged)
-                local reloadWait = (metadata._itemConfig.reloadTime or 2) - 0.2
-                task.wait(math.max(0, reloadWait))
-                if ranged then
-                    pcall(function()
-                        local reloaded, _ = network:InvokeServer("FinishedRangedReload", ranged)
-                        if reloaded and metadata._clientAmmoVO then
-                            metadata._clientAmmoVO.Value = metadata._itemConfig.maxAmmo or metadata._clientAmmoVO.Value
-                            metadata.canShootBulletssss = true
-                        end
-                    end)
-                end
-                return
-            end
+			if metadata._clientAmmoVO.Value <= 0 then
+				continue;
+			end;
 
-            if metadata.canShootBulletssss == false then
-                if metadata._itemConfig and metadata._itemConfig.maxAmmo == 1 then
-                    metadata.canShootBulletssss = true
-                else
-                    return
-                end
-            end
+			if not metadata.canShootBulletssss then
+				if metadata._itemConfig.maxAmmo == 1 then
+					metadata.canShootBulletssss = true;
+				else
+					continue;
+				end;
+			end;
 
-            if not metadata._mainCasterBehavior or not metadata._mainCaster then return end
+			if not metadata._mainCasterBehavior or not metadata._mainCaster then
+				continue;
+			end;
 
-            local targetPlayer = players:FindFirstChild(next(player))
-            if not targetPlayer or not targetPlayer.Character then return end
+			local targetPlayer = players:FindFirstChild(next(player));
+			if not targetPlayer or not targetPlayer.Character then
+				continue;
+			end;
 
-            local targetHumanoid = targetPlayer.Character:FindFirstChild("Humanoid")
-            if not targetHumanoid or targetHumanoid.Health == 0 then
-                LockedTarget = nil
-                return
-            end
-            if framework:InMenu(targetPlayer) then
-                LockedTarget = nil
-                return
-            end
-            
-            -- Prevent targeting ragdolled/dead/downed players to avoid game-side VFX errors
-            if targetPlayer.Character:GetAttribute("IsRagdolled") or targetPlayer.Character:GetAttribute("Downed") then
-                LockedTarget = nil
-                return
-            end
+			local targetHumanoid = targetPlayer.Character:FindFirstChild("Humanoid");
+			if not targetHumanoid or targetHumanoid.Health == 0 then
+				LockedTarget = nil;
+				continue;
+			end;
 
-            local Head = targetPlayer.Character:FindFirstChild("Head") 
-                       or targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if not Head or targetPlayer.Character:FindFirstChildOfClass("ForceField") then
-                LockedTarget = nil
-                return
-            end
+			if framework:InMenu(targetPlayer) then
+				LockedTarget = nil;
+				continue;
+			end;
 
-            local function safeReset()
-                if metadata then metadata.canShootBulletssss = true end
-            end
+			local hitpart = gethitpart(targetPlayer.Character);
+			if not hitpart or targetPlayer.Character:FindFirstChildOfClass("ForceField") then
+				LockedTarget = nil;
+				continue;
+			end;
 
-            local success, err = pcall(function()
-                metadata.canShootBulletssss = false
-                LockedTarget = player
-                
-                local itemConfig = metadata._itemConfig or {}
-                local projectileSpeed = itemConfig.speed or 200
-                local projectileGravity = itemConfig.gravity or Vector3.new(0, 0, 0)
-                local chargeValue = (metadata._chargeProgressVO and metadata._chargeProgressVO.Value and metadata._chargeProgressVO.Value > 0) and metadata._chargeProgressVO.Value or 1
+			metadata.canShootBulletssss = false;
+			LockedTarget = player;
 
-                if isFlamethrower then
-                    local params = metadata._mainCasterBehavior.RaycastParams
-                    local filter = params.FilterDescendantsInstances or {}
-                    local newFilter = table.clone(filter)
-                    if not table.find(newFilter, PlayerCharacters) then table.insert(newFilter, PlayerCharacters) end
-                    if not table.find(newFilter, Map) then table.insert(newFilter, Map) end
-                    if not table.find(newFilter, workspace.Terrain or workspace:FindFirstChildOfClass("Terrain")) then 
-                        table.insert(newFilter, workspace.Terrain) 
-                    end
-                    params.FilterDescendantsInstances = newFilter
+			local params = metadata._mainCasterBehavior.RaycastParams;
+			local filter = params.FilterDescendantsInstances or {};
+			local newFilter = table.clone(filter);
 
-                    local origin = metadata:getCheatedBackOriginIfInObject(params)
+			if not table.find(newFilter, PlayerCharacters) then
+				table.insert(newFilter, PlayerCharacters);
+			end;
 
-                    local finalPos = PredictTargetPosition(
-                        origin,
-                        { Position = Head.Position, Velocity = Head.Velocity or Vector3.zero },
-                        projectileSpeed,
-                        LocalPlayer:GetNetworkPing() * 1000,
-                        projectileGravity
-                    )
+			if not table.find(newFilter, Map) then
+				table.insert(newFilter, Map);
+			end;
 
-                    local CF = CFrame.new(Vector3.new(), (finalPos - origin).Unit)
-                    local dir = SA_Logic.OldCalculateFire(CF, 0, 0, 5000)
+			if not table.find(newFilter, workspace.Terrain) then
+				table.insert(newFilter, workspace.Terrain);
+			end;
 
-                    local fakeBehavior = {
-                        RaycastParams = params,
-                        Acceleration = Vector3.new(),
-                        MaxDistance = 5000,
-                        HighFidelityBehavior = 1,
-                        HighFidelitySegmentSize = 0.5,
-                        CosmeticBulletContainer = EffectsJunk,
-                        AutoIgnoreContainer = true,
-                    }
+			params.FilterDescendantsInstances = newFilter;
 
-                    local template = metadata._cosmeticProjectileTemplate
-                    if typeof(fakeBehavior) == "Instance" then
-                        fakeBehavior.CosmeticBulletProvider = nil
-                        fakeBehavior.CosmeticBulletTemplate = template
-                    else
-                        fakeBehavior.CosmeticBulletProvider = template
-                        fakeBehavior.CosmeticBulletTemplate = nil
-                    end
+			local origin = metadata:getCheatedBackOriginIfInObject(params);
+			local projectileSpeed = metadata._itemConfig.speed or 200;
+			local projectileGravity = metadata._itemConfig.gravity or Vector3.new(0, 0, 0);
 
-                    local cast = metadata._mainCaster:Fire(origin, dir, projectileSpeed, fakeBehavior)
-                    metadata._cheatId = (metadata._cheatId or 0) + 1
-                    cast.UserData = {
-                        ["player"] = LocalPlayer,
-                        ["tool"] = ranged,
-                        ["shotId"] = tostring(metadata._cheatId),
-                        ["origin"] = origin,
-                        ["chargePercentage"] = chargeValue,
-                    }
-                    network:FireServer("RangedHit", ranged, origin,
-                        { [tostring(metadata._cheatId)] = dir.Unit },
-                        { [tostring(metadata._cheatId)] = dir },
-                        { [1] = tostring(metadata._cheatId) },
-                        nil,
-                        Camera.CFrame,
-                        Workspace:GetServerTimeNow(),
-                        chargeValue
-                    )
-                    
-                    -- Trigger hit detection
-                    local damage = (itemConfig.damage or itemConfig.baseDamage or itemConfig.base_damage or itemConfig.maxDamage or itemConfig.max_damage or 0)
-                    if typeof(damage) == "table" then
-                        damage = damage[Head.Name] or damage.Head or damage[1] or damage.base or 0
-                    end
-                    
-                    damage = damage * chargeValue
+			local finalPos = PredictTargetPosition(
+				origin,
+				{
+					Position = hitpart.Position,
+					Velocity = hitpart.Velocity,
+				},
+				projectileSpeed,
+				localplayer:GetNetworkPing() * 1000,
+				projectileGravity
+			);
 
-                    if Head and Head.Name == "Head" then
-                         local multiplier = itemConfig.headshotMultiplier or itemConfig.headShotMultiplier or 1.5
-                         damage = damage * multiplier
-                    end
-                    OnHit(targetPlayer, Head, damage)
-                    
-                    if metadata._clientAmmoVO then
-                        metadata._clientAmmoVO.Value = math.max(0, metadata._clientAmmoVO.Value - 1)
-                    end
-                    task.wait(0.06 + math.random() * 0.04)
-                    metadata.canShootBulletssss = true
-                else
-                    local params = metadata._mainCasterBehavior.RaycastParams
-                    local filter = params.FilterDescendantsInstances or {}
-                    local newFilter = table.clone(filter)
-                    if not table.find(newFilter, PlayerCharacters) then table.insert(newFilter, PlayerCharacters) end
-                    if not table.find(newFilter, Map) then table.insert(newFilter, Map) end
-                    params.FilterDescendantsInstances = newFilter
+			local CF = CFrame.new(Vector3.new(), (finalPos - origin).Unit);
+			local dir = OldCalculateFire(CF, 0, 0, 5000);
 
-                    local origin = metadata:getCheatedBackOriginIfInObject(params)
+			local fakeBehavior = {
+				RaycastParams = params,
+				Acceleration = Vector3.new(),
+				MaxDistance = 5000,
+				HighFidelityBehavior = 1,
+				HighFidelitySegmentSize = 0.5,
+				CosmeticBulletContainer = EffectsJunk,
+				AutoIgnoreContainer = true,
+			};
 
-                    local finalPos = PredictTargetPosition(
-                        origin,
-                        { Position = Head.Position, Velocity = Head.Velocity or Vector3.zero },
-                        projectileSpeed,
-                        LocalPlayer:GetNetworkPing() * 1000,
-                        projectileGravity
-                    )
+			local template = metadata._cosmeticProjectileTemplate;
+			fakeBehavior.CosmeticBulletProvider = template;
+			fakeBehavior.CosmeticBulletTemplate = nil;
 
-                    local CF = CFrame.new(Vector3.new(), (finalPos - origin).Unit)
-                    local dir = SA_Logic.OldCalculateFire(CF, 0, 0, 5000)
+			local cast = metadata._mainCaster:Fire(origin, dir, projectileSpeed, fakeBehavior);
 
-                    local fakeBehavior = {
-                        RaycastParams = params,
-                        Acceleration = Vector3.new(),
-                        MaxDistance = 5000,
-                        HighFidelityBehavior = 1,
-                        HighFidelitySegmentSize = 0.5,
-                        CosmeticBulletContainer = EffectsJunk,
-                        AutoIgnoreContainer = true,
-                    }
+			metadata._cheatId = (metadata._cheatId or 0) + 1;
 
-                    local template = metadata._cosmeticProjectileTemplate
-                    if typeof(fakeBehavior) == "Instance" then
-                        fakeBehavior.CosmeticBulletProvider = nil
-                        fakeBehavior.CosmeticBulletTemplate = template
-                    else
-                        fakeBehavior.CosmeticBulletProvider = template
-                        fakeBehavior.CosmeticBulletTemplate = nil
-                    end
+			cast.UserData = {
+				player = LocalPlayer,
+				tool = ranged,
+				shotId = tostring(metadata._cheatId),
+				origin = origin,
+			};
 
-                    local cast = metadata._mainCaster:Fire(origin, dir, projectileSpeed, fakeBehavior)
-                    metadata._cheatId = (metadata._cheatId or 0) + 1
-                    cast.UserData = {
-                        ["player"] = LocalPlayer,
-                        ["tool"] = ranged,
-                        ["shotId"] = tostring(metadata._cheatId),
-                        ["origin"] = origin,
-                        ["chargePercentage"] = chargeValue,
-                    }
+			network:FireServer(
+				"RangedFire",
+				ranged,
+				origin,
+				{ [tostring(metadata._cheatId)] = dir.Unit },
+				{ [tostring(metadata._cheatId)] = dir },
+				{ [1] = tostring(metadata._cheatId) },
+				nil,
+				Camera.CFrame,
+				Workspace:GetServerTimeNow()
+			);
 
-                    network:FireServer("RangedFire", ranged, origin,
-                        { [tostring(metadata._cheatId)] = dir.Unit },
-                        { [tostring(metadata._cheatId)] = dir },
-                        { [1] = tostring(metadata._cheatId) },
-                        nil,
-                        Camera.CFrame,
-                        Workspace:GetServerTimeNow(),
-                        chargeValue
-                    )
+			metadata._clientAmmoVO.Value -= 1;
 
-                    if metadata._clientAmmoVO then
-                        metadata._clientAmmoVO.Value = math.max(0, metadata._clientAmmoVO.Value - 1)
-                    end
+			local distance = (origin - hitpart.Position).Magnitude;
+			local timeToHit = distance / projectileSpeed;
 
-                    local distance = (origin - Head.Position).Magnitude
-                    local timeToHit = distance / projectileSpeed
+			if not (
+				ranged.Name == "Longbow"
+				or ranged.Name == "Crossbow"
+				or ranged.Name == "Heavy Bow"
+			) then
+				task.delay(timeToHit + 0.08, function()
+					if not (cast and cast.UserData and cast.StateInfo and cast.StateInfo.UpdateConnection) then
+						return;
+					end;
 
-                    if not (ranged.Name == "Longbow" or ranged.Name == "Crossbow" or ranged.Name == "Heavy Bow") then
-                        task.delay(timeToHit + 0.08, function()
-                            if cast and cast.UserData and metadata and metadata._mainCaster then
-                                if Toggles.ShowLine and Toggles.ShowLine.Value then
-                                    local part = Instance.new("Part")
-                                    part.Anchored = true
-                                    part.CanCollide = false
-                                    part.Material = Enum.Material.Neon
-                                    part.Color = (Options.linecolor and Options.linecolor.Value) or Color3.new(1,1,1)
-                                    part.Size = Vector3.new(0.1, 0.1, (Head.Position - HumanoidRootPart.Position).Magnitude)
-                                    part.CFrame = CFrame.new(HumanoidRootPart.Position, Head.Position) * CFrame.new(0, 0, -part.Size.Z / 2)
-                                    part.Transparency = 0
-                                    part.Parent = workspace
-                                    task.spawn(function()
-                                        local fadeTime = 2
-                                        local steps = 30
-                                        for i = 1, steps do
-                                            part.Transparency = i / steps
-                                            task.wait(fadeTime / steps)
-                                        end
-                                        part:Destroy()
-                                    end)
-                                end
+					if Classes.ShowLine.Value then
+						local part = Instance.new("Part");
+						part.Anchored = true;
+						part.CanCollide = false;
+						part.Material = Enum.Material.Neon;
+						part.Color = Colors.ShowLine;
+						part.Size = Vector3.new(
+							0.1,
+							0.1,
+							(hitpart.Position - HumanoidRootPart.Position).Magnitude
+						);
+						part.CFrame =
+							CFrame.new(HumanoidRootPart.Position, hitpart.Position)
+							* CFrame.new(0, 0, -part.Size.Z / 2);
+						part.Parent = workspace;
 
-                                metadata._mainCaster.RayHit:Fire(cast, {
-                                    Distance = 1,
-                                    Instance = Head,
-                                    Material = Enum.Material.SmoothPlastic,
-                                    Position = Head.Position,
-                                    Normal = Vector3.yAxis,
-                                }, nil, cast.RayInfo and cast.RayInfo.CosmeticBulletObject or nil)
-                                
-                                -- Trigger hit detection
-                                local damage = (itemConfig.damage or itemConfig.baseDamage or itemConfig.base_damage or itemConfig.maxDamage or itemConfig.max_damage or 0)
-                                if typeof(damage) == "table" then
-                                    damage = damage[Head.Name] or damage.Head or damage[1] or damage.base or 0
-                                end
-                                
-                                damage = damage * chargeValue
+						task.spawn(function()
+							local fadeTime = 2;
+							local steps = 30;
 
-                                if Head and Head.Name == "Head" then
-                                    local multiplier = itemConfig.headshotMultiplier or itemConfig.headShotMultiplier or 1.5
-                                    damage = damage * multiplier
-                                end
-                                OnHit(targetPlayer, Head, damage)
-                                
-                                cast:Terminate()
-                            end
-                        end)
-                    end
-                    task.wait(itemConfig.cooldown or 0.1)
-                    metadata.canShootBulletssss = true
-                end
-            end)
+							for i = 1, steps do
+								part.Transparency = i / steps;
+								task.wait(fadeTime / steps);
+							end;
 
-            if not success then
-                warn("serenium.error (ragebot inner): " .. tostring(err))
-            end
-        end)
+							part:Destroy();
+						end);
+					end;
 
-        if not loopSuccess then
-            warn("serenium.error (ragebot loop): " .. tostring(loopErr))
-            task.wait(1)
-        end
+					metadata._mainCaster.RayHit:Fire(
+						cast,
+						{
+							Distance = 1,
+							Instance = hitpart,
+							Material = Enum.Material.SmoothPlastic,
+							Position = hitpart.Position,
+							Normal = Vector3.yAxis,
+						},
+						nil,
+						cast.RayInfo and cast.RayInfo.CosmeticBulletObject or nil
+					);
 
-        if not Active then break end
-    end
-end))
+					cast:Terminate();
+				end);
+			end;
+
+			task.wait(metadata._itemConfig.cooldown);
+			metadata.canShootBulletssss = true;
+		end;
+	end);
+end;
 local snipertext = "";
 local status = sniper:AddLabel("status: idle")
 sniper:AddInput("sniper", {
