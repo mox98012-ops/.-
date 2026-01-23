@@ -2209,38 +2209,6 @@ framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function()
 		end;
 	end;
 end));
-local roles = {
-    ["Community Senior"] = true;
-    ["Community Moderator"] = true;
-	["Game Moderator"] = true;
-    ["Senior Moderator"] = true;
-    ["Developer"] = true;
-    ["Analytics"] = true;
-	["Studio Developer"] = true;
-	["Lead"] = true;
-    ["NOCTOVO"] = true;
-};
-local kickmessage = "Staff Detected By Anti Mod\n%s (@%s) - %s";
-function checkmod(Player)
-	local Success, Role = pcall(function()
-		return Player:GetRoleInGroupAsync(5192826);
-	end);
-	if Success and roles[Role] then
-		localplayer:Kick(kickmessage:format(Player.DisplayName, Player.Name, Role));
-		return;
-	end;
-end;
-function antimod(Player)
-	if Player then
-		checkmod(Player);
-	else
-		for _, Player in pairs(players:GetPlayers()) do
-			if Player ~= localplayer then
-				checkmod(Player);
-			end;
-		end;
-	end;
-end;
 framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function() -- auto stomp
         if getgenv().autostompshove then
             local character = localplayer.Character
@@ -3916,64 +3884,53 @@ mmisc:AddToggle("antimod", {
     Callback = function(Value)
         getgenv().antimod = Value;
         if Value then
-            getgenv().AntiModRunning = true
-            getgenv().AntiModLastCheck = 0
-            local groupId = 5192826
-            local targetRoles = {
-                ["Moderator"] = true,
-                ["Senior Moderator"] = true,
-                ["Developer"] = true,
-                ["Studio Developer"] = true,
-                ["Senior"] = true,
-                ["Lead"] = true,
-                ["Community Team Member"] = true,
-                ["Staff"] = true,
-                ["Admin"] = true,
-                ["Owner"] = true,
-                ["Contributor"] = true,
-            }
-            getgenv().AntiModConnection = runservice.Heartbeat:Connect(function()
-                if not getgenv().antimod then
-                    if getgenv().AntiModConnection then
-                        getgenv().AntiModConnection:Disconnect()
-                        getgenv().AntiModConnection = nil
-                    end
-                    return
-                end
-                if tick() - getgenv().AntiModLastCheck < 2.5 then
-                    return
-                end
-                getgenv().AntiModLastCheck = tick()
-
-                for _, player in ipairs(players:GetPlayers()) do
-                    if player ~= localplayer then
-                        local success, role = pcall(function()
-                            return player:GetRoleInGroup(groupId)
-                        end)
-
-                        if success and targetRoles[role] then
-                            localplayer:Kick(
-                                "Staff Detected By Anti Mod\n"
-                                .. player.DisplayName
-                                .. " (@"
-                                .. player.Name
-                                .. ") - "
-                                .. role
-                            )
-                            return
-                        end
-                    end
-                end
-            end)
+            antimod = true;
+            lastcheck = 0;
+            local groupid = 5192826;
+            local roles = {
+                ["Community Senior"] = true;
+				["Combat Warrior"] = true;
+                ["Community Moderator"] = true;
+                ["Game Moderator"] = true;
+                ["Senior Moderator"] = true;
+                ["Developer"] = true;
+                ["Analytics"] = true;
+                ["Studio Developer"] = true;
+                ["Lead"] = true;
+                ["NOCTOVO"] = true;
+            };
+            task.spawn(function()
+                while getgenv().antimod do
+                    if tick() - lastcheck >= 2.5 then
+                        lastcheck = tick();
+                        for _, player in ipairs(players:GetPlayers()) do
+                            if player ~= localplayer then
+                                local success, role = pcall(function()
+                                    return player:GetRoleInGroup(groupid);
+                                end);
+                                if success and roles[role] then
+                                    localplayer:Kick(
+                                        "staff detected\n"
+                                        .. player.DisplayName
+                                        .. " (@"
+                                        .. player.Name
+                                        .. ") - "
+                                        .. role
+                                    );
+                                    return;
+                                end;
+                            end;
+                        end;
+                    end;
+                    task.wait(2)
+                end;
+            end);
         else
-            getgenv().AntiModRunning = false
-            if getgenv().AntiModConnection then
-                getgenv().AntiModConnection:Disconnect()
-                getgenv().AntiModConnection = nil
-            end
-        end
+            antimod = false;
+            getgenv().antimod = false;
+        end;
     end;
-});
+})
 mmisc:AddToggle("ShowRageBotTarget", {
 	Text = "show ragebot target";
 	Default = false;
