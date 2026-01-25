@@ -369,6 +369,11 @@ local function connect(newchar)
     character = newchar;
     humanoidrootpart = character:WaitForChild("HumanoidRootPart");
 	humanoid = character:WaitForChild("Humanoid");
+	LockedTarget = nil
+    if getgenv().lastmetadata and getgenv().lastmetadata.canShootBulletssss ~= nil then
+        getgenv().lastmetadata.canShootBulletssss = true;
+	end;
+    getgenv().lastmetadata = nil;
 end;
 localplayer.CharacterAdded:Connect(connect);
 userinputservice.InputBegan:Connect(function(input, gpe)
@@ -2142,128 +2147,157 @@ network:BindEvents({
         end;
     end);
 });
+do
+local effectsjunk = workspace:WaitForChild("EffectsJunk")
+local map = workspace:FindFirstChild("Map")
+local processed = {}
+local targets = {}
+local function safeAdd(obj)
+    if obj then
+        targets[obj] = true
+    end
+end
+safeAdd(effectsjunk:FindFirstChild("OpenBearTrap"))
+safeAdd(effectsjunk:FindFirstChild("utility5Proxy"))
+safeAdd(effectsjunk:FindFirstChild("utility7Proxy"))
+safeAdd(effectsjunk:FindFirstChild("utility10Proxy"))
+local partCache = effectsjunk:FindFirstChild("PartCache")
+if partCache then
+    safeAdd(partCache:FindFirstChild("Kunai"))
+    safeAdd(partCache:FindFirstChild("Arrow"))
+    safeAdd(partCache:FindFirstChild("Shuriken"))
+end
+if map then
+    safeAdd(map:FindFirstChild("PlacedClaymore"))
+end
+local function shouldDisable(part)
+    if part:GetAttribute("DamagePerSecond") then
+        return true
+    end
+    for root in pairs(targets) do
+        if root and part:IsDescendantOf(root) then
+            return true
+        end
+    end
+    return false
+end
+local function processPart(part)
+    if not getgenv().nut then return end
+    if not part:IsA("BasePart") then return end
+    if processed[part] then return end
+    processed[part] = true
+    if not shouldDisable(part) then return end
+    part.CanCollide = false
+    part.CanTouch = false
+    part.CanQuery = false
+end
+for _, obj in ipairs(effectsjunk:GetDescendants()) do
+    processPart(obj)
+end
+if map then
+    for _, obj in ipairs(map:GetDescendants()) do
+        processPart(obj)
+    end
+end
+effectsjunk.DescendantAdded:Connect(processPart)
+if map then
+    map.DescendantAdded:Connect(processPart)
+end
+effectsjunk.DescendantAdded:Connect(processpart)
+end;
 framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function()
-	if getgenv().nut then
-		if character and not character:FindFirstChild("ff") then
-			local force = Instance.new("ForceField", character);
-			force.Visible = false;
-			force.Name = "ff";
-		end;
-	else
-		if character and character:FindFirstChild("ff") then
-			character.ff:Destroy();
-		end;
-	end;
     if getgenv().fastrespawn then
-        if humanoid and humanoid.Health == 0 then
+        if humanoid.Health == 0 then
             network:FireServer("StartFastRespawn");
             network:InvokeServer("CompleteFastRespawn");
         end;
     end;
     if getgenv().loopspawn and framework:InMenu(localplayer) then
         network:InvokeServer("SpawnCharacter", true);
-    end; 
-end));
-framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function()
-	if getgenv().ar then
-		if humanoid.Health <= 15 then
-			network:FireServer("SelfReviveStart");
-			network:FireServer("SelfRevive");
-		end;
-	end;
-end));
-framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function()
-	local weapon, metadata = framework:GetWeapon();
-	local debounce = false;
-	if weapon and metadata then
-		if getgenv().fakeswing and not Debounce then
-			Debounce = true;
-			metadata.animations.slashes[math.random(1, #metadata.animations.slashes)]:Play();
-			task.delay(0.5, function()
-				Debounce = false;
-			end);
-		end;
-	end;
-end));
-framework:BindToRenderStep(LPH_NO_VIRTUALIZE(function() -- auto stomp
-        if getgenv().autostompshove then
-            local character = localplayer.Character
-            local closest = framework:GetClosest(getgenv().stompshoverange, true)
-            if character and character:FindFirstChild("Stomp") and closest and next(closest) then
-                local metadata = modules.Name["MeleeWeaponClient"].getObj(character.Stomp)
-                if metadata and metadata._cooldownProgressTimer:getValue() > 0.75 then
-                    local slashData = metadata._itemConfig.slashMetadata[metadata._currSlashCount]
-                    local hitbox = slashData.getHitboxInfo(metadata.tool)
-                    local hitboxes = metadata:getHitboxesToUseFromHitboxParts(hitbox.hitboxPartsToUse)
-                    for i, v in hitboxes do
-                        if not v.HitboxPendingRemoval then
-                            for playername, health in closest do
-                                local targetPlayer = players:FindFirstChild(playername)
-                                local data = targetPlayer and framework:GetSessionData(targetPlayer)
-                                local state = data and data:getState()
-
-                                if
-                                    targetPlayer
-                                    and targetPlayer.Character
-                                    and targetPlayer.Character:FindFirstChild("Head")
-                                    and targetPlayer.Character:FindFirstChild("Humanoid")
-                                    and health ~= 0
-                                    and (
-                                        health <= 15
-                                        or (state and state.parry.isParried)
-                                        or targetPlayer.Character.Humanoid:GetAttribute("IsRagdolledServer")
-                                    )
-                                then
-                                    setthreadidentity(2)
-                                    metadata:slash()
-                                    setthreadidentity(8)
-
-                                    local head = targetPlayer.Character:FindFirstChild("Head")
-                                    local targetHumanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
-                                    if head and targetHumanoid then
-                                        v.OnHit:Fire(head, targetHumanoid, {
-                                            Distance = 1,
-                                            Instance = head,
-                                            Material = Enum.Material.SmoothPlastic,
-                                            Position = head.Position,
-                                            Normal = Vector3.yAxis,
-                                        }, head.Position, head.Position)
-                                    end;
+    end;
+    if getgenv().ar then
+        local store = modules.Name["DataHandler"].getSessionDataRoduxStoreForPlayer(LocalPlayer)
+        if store and store:getState().down.isDowned then
+            network:FireServer("SelfReviveStart");
+            network:FireServer("SelfRevive");
+        end;
+    end;
+    local weapon, metadata = framework:GetWeapon();
+    if weapon and metadata then
+        if getgenv().fakeswing and not Debounce then
+            Debounce = true;
+            metadata.animations.slashes[math.random(1, #metadata.animations.slashes)]:Play();
+            task.delay(0.5, function()
+                Debounce = false;
+            end);
+        end;
+    end;
+    if getgenv().autostompshove then
+        local character = localplayer.Character
+        local closest = framework:GetClosest(getgenv().stompshoverange, true)
+        if character and character:FindFirstChild("Stomp") and closest and next(closest) then
+            local metadata = modules.Name["MeleeWeaponClient"].getObj(character.Stomp)
+            if metadata and metadata._cooldownProgressTimer:getValue() > 0.75 then
+                local slashData = metadata._itemConfig.slashMetadata[metadata._currSlashCount]
+                local hitbox = slashData.getHitboxInfo(metadata.tool)
+                local hitboxes = metadata:getHitboxesToUseFromHitboxParts(hitbox.hitboxPartsToUse)
+                for i, v in hitboxes do
+                    if not v.HitboxPendingRemoval then
+                        for playername, health in closest do
+                            local targetPlayer = players:FindFirstChild(playername)
+                            local data = targetPlayer and framework:GetSessionData(targetPlayer)
+                            local state = data and data:getState()
+                            if
+                                targetPlayer
+                                and targetPlayer.Character
+                                and targetPlayer.Character:FindFirstChild("Head")
+                                and targetPlayer.Character:FindFirstChild("Humanoid")
+                                and health ~= 0
+                                and (
+                                    health <= 15
+                                    or (state and state.parry.isParried)
+                                    or targetPlayer.Character.Humanoid:GetAttribute("IsRagdolledServer")
+                                )
+                            then
+                                setthreadidentity(2)
+                                metadata:slash()
+                                setthreadidentity(8)
+                                local head = targetPlayer.Character:FindFirstChild("Head")
+                                local targetHumanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+                                if head and targetHumanoid then
+                                    v.OnHit:Fire(head, targetHumanoid, {
+                                        Distance = 1,
+                                        Instance = head,
+                                        Material = Enum.Material.SmoothPlastic,
+                                        Position = head.Position,
+                                        Normal = Vector3.yAxis,
+                                    }, head.Position, head.Position)
                                 end
                             end
-                            break
                         end
+                        break
                     end
                 end
             end
         end
-    end,
-    nil,
-    Enum.RenderPriority.Character
-))
-
-task.spawn(LPH_NO_VIRTUALIZE(function() -- auto glory
-    while runservice.RenderStepped:Wait() do
-        if getgenv().autoglory then
-            task.wait(getgenv().glorydelay)
-
-            local closest = framework:GetClosest(getgenv().gloryrange, true)
-            local tool = framework:GetWeapon()
-
-            if tool and closest and next(closest) then
-                local targetPlayer = players:FindFirstChild(next(closest))
-                if
-                    targetPlayer
-                    and targetPlayer.Character
-                    and targetPlayer.Character:FindFirstChild("Humanoid")
-                    and targetPlayer.Character.Humanoid.Health <= 20
-                then
-                    network:FireServer("StartGloryKill", tool, targetPlayer.Character, CFrame.new(), Vector3.new())
-                end
+    end
+    if getgenv().autoglory then
+        task.wait(getgenv().glorydelay)
+        local closest = framework:GetClosest(getgenv().gloryrange, true)
+        local tool = framework:GetWeapon()
+        if tool and closest and next(closest) then
+            local targetPlayer = players:FindFirstChild(next(closest))
+            if
+                targetPlayer
+                and targetPlayer.Character
+                and targetPlayer.Character:FindFirstChild("Humanoid")
+                and targetPlayer.Character.Humanoid.Health <= 20
+            then
+                network:FireServer("StartGloryKill", tool, targetPlayer.Character, CFrame.new(), Vector3.new())
             end
         end
     end
-end))
+end, nil, Enum.RenderPriority.Character))
 
 -- ui setup
 local function UpdateFeature(toggleName, keyName, setter)
@@ -2354,7 +2388,7 @@ main:AddSlider("TPRange", {
 	Text = "tp range";
 	Default = 5;
 	Min = 1;
-	Max = 12;
+	Max = 15;
 	Rounding = 0;
 	Compact = true;
 });
@@ -2364,7 +2398,6 @@ local Classes = setmetatable({}, {
 	end
 })
 
--- Helper function
 local function waitUntilTimeout(signal, timeout)
 	if not signal then
 		return "Signal creation failed";
@@ -2423,16 +2456,17 @@ framework:BindToRenderStep(function()
 		if weapon and metadata then
 			local closest = framework:GetClosest(Classes.KillAuraRange.Value, true);
 			if closest and next(closest) then
-                local onCooldown = metadata._cooldownProgressTimer:getValue() < 0.75;
+                local threshold = 0.765;
+                local buffer = (1 - threshold) * metadata._itemConfig.cooldown;
+                local now = tick();
+                local last = metadata._lastSlashTick;
+                local onCooldown = (now - last) < (metadata._itemConfig.cooldown - buffer);
                 if not onCooldown then
                     KADebounce = true;
                     if not Classes.PlayAnimation.Value then
                         local slash = math.random(1, #metadata._itemConfig.slashMetadata);
-                        metadata._cooldownProgressTimer:setValue(0);
-                        metadata:setSlashCount(slash);
                         network:FireServer("MeleeSwing", weapon, slash);
                         metadata._lastSlashTick = tick();
-                        weapon:SetAttribute("LastSlashTick", metadata._lastSlashTick);
                         task.wait(0.1);
 						for i, v in hitboxes do
 							for playername, health in closest do
@@ -3278,22 +3312,24 @@ do
 
 	local jpconn;
 	charactertab:AddToggle("jumppower", {
-	    Text = "jump power";
+	    Text = "jump power",
 	    Default = false;
 	    Callback = function(enabled)
 	        getgenv().jumppowerenabled = enabled;
+	        if jpconn then
+	            jpconn:Disconnect();
+	            jpconn = nil;
+	        end;
 	        if enabled then
-	            jpconn = runservice.Heartbeat:Connect(function()
-	                local jumppower = modules.Name["JumpHandlerClient"].getJumpPowerValueContainer();
-	                jumppower:setBaseValue(getgenv().jumppower);
+	            jpconn = runservice.RenderStepped:Connect(function()
+	                if humanoid and getgenv().jumppower then
+	                    humanoid.JumpPower = getgenv().jumppower;
+	                end;
 	            end);
 	        else
-	            if jpconn then
-	                jpconn:Disconnect();
-	                jpconn = nil;
+	            if humanoid then
+	                humanoid.JumpPower = 50;
 	            end;
-	            local jumppower = modules.Name["JumpHandlerClient"].getJumpPowerValueContainer();
-	            jumppower:setBaseValue(50);
 	        end;
 	    end;
 	});
@@ -3389,9 +3425,8 @@ do
 	    Compact = true,
 	    Callback = function(value)
 	        getgenv().jumppower = value;
-	        if getgenv().jumppowerenabled then
-	            local jumppower = modules.Name["JumpHandlerClient"].getJumpPowerValueContainer();
-	            jumppower:setBaseValue(value);
+	        if getgenv().jumppowerenabled and humanoid then
+	            humanoid.JumpPower = value;
 	        end;
 	    end;
 	});
@@ -3541,36 +3576,51 @@ exploit:AddToggle("antifling", {
     Callback = function(Value)
         getgenv().antifling = Value;
         if getgenv().AntiFlingConnection then
-            getgenv().AntiFlingConnection:Disconnect();
-            getgenv().AntiFlingConnection = nil;
-        end;
-        if getgenv().AntiFlingConnections then
-            for _, c in pairs(getgenv().AntiFlingConnections) do pcall(function() c:Disconnect() end) end
-            getgenv().AntiFlingConnections = nil
+            getgenv().AntiFlingConnection:Disconnect()
+            getgenv().AntiFlingConnection = nil
         end
-        
+        local collision = {}
         if Value then
-            getgenv().AntiFlingConnections = {}
-            local function disable(part)
-                if part:IsA("BasePart") then
-                    part.CanCollide = false
+            getgenv().AntiFlingConnection = game:GetService("RunService").Heartbeat:Connect(function()
+                for _, player in ipairs(game.Players:GetPlayers()) do
+                    if player == game.Players.LocalPlayer or not player.Character then continue end
+                    pcall(function()
+                        local parts = {}
+                        for _, part in ipairs(player.Character:GetChildren()) do
+                            if part:IsA("BasePart") then
+                                if not collision[player] then collision[player] = {} end
+                                if not collision[player][part] then
+                                    collision[player][part] = {
+                                        CanCollide = part.CanCollide,
+                                        Massless = part.Name == "Torso" and part.Massless or false
+                                    }
+                                end
+                                part.CanCollide = false
+                                if part.Name == "Torso" then
+                                    part.Massless = true
+                                end
+                                part.Velocity = Vector3.zero
+                                part.RotVelocity = Vector3.zero
+                            end
+                        end
+                        collision[player] = collision[player] or parts
+                    end)
+                end
+            end)
+        else
+            for player, parts in pairs(collision) do
+                if player and player.Character then
+                    for part, props in pairs(parts) do
+                        if part and part:IsA("BasePart") then
+                            part.CanCollide = props.CanCollide
+                            if part.Name == "Torso" then
+                                part.Massless = props.Massless
+                            end
+                        end
+                    end
                 end
             end
-            
-            local function registerChar(char)
-                for _, v in pairs(char:GetDescendants()) do disable(v) end
-                table.insert(getgenv().AntiFlingConnections, char.DescendantAdded:Connect(disable))
-            end
-            
-            local function registerPlayer(plr)
-                if plr ~= localplayer then
-                    if plr.Character then registerChar(plr.Character) end
-                    table.insert(getgenv().AntiFlingConnections, plr.CharacterAdded:Connect(registerChar))
-                end
-            end
-            
-            for _, plr in pairs(players:GetPlayers()) do registerPlayer(plr) end
-            table.insert(getgenv().AntiFlingConnections, players.PlayerAdded:Connect(registerPlayer))
+            collision = {}
         end
     end;
 });
@@ -4524,6 +4574,29 @@ local function AttemptKillTarget(targetPlayer)
 	AttachRoot = nil;
 	StopJitter();
 end;
+misc1:AddButton({
+    Text = "re-init attempt kill",
+    Func = function()
+		if framework:InMenu(localplayer) then
+			repeat
+				task.wait();
+			until not framework:InMenu(localplayer);
+		end;
+		task.wait(0.1);
+		if not humanoidrootpart then
+			return;
+		end;
+		CanKillAll = false;
+		CanFireStartFallDamage = false;
+		humanoidrootpart.CFrame = humanoidrootpart.CFrame + Vector3.new(0, 1000, 0);
+		task.wait(0.2);
+		network:FireServer("StartFallDamage");
+		humanoidrootpart.CFrame = humanoidrootpart.CFrame + Vector3.new(0, -1000, 0);
+		CanKillAll = true;
+    end,
+    Tooltip = "re-initialize attempt kill incase it failed";
+});
+
 local loopkillthread = nil;
 local currentTarget = nil;
 local loopkilltarget_hb = nil;
@@ -4670,7 +4743,31 @@ auto:AddToggle("loopkillall", {
 		end;
 	end;
 });
-
+local cas = game:GetService("ContextActionService");
+local function alive(player)
+	local character = player.Character;
+	if not character then return false; end;
+	local humanoid = character:FindFirstChildOfClass("Humanoid");
+	if not humanoid then return false; end;
+	return humanoid.Health > 0;
+end;
+local function onspace(actionName, inputState)
+	if inputState == Enum.UserInputState.Begin then
+		network:InvokeServer("SpawnCharacter", true);
+	end;
+	return Enum.ContextActionResult.Sink;
+end;
+runservice.RenderStepped:Connect(function()
+	local menu = framework:InMenu(localplayer);
+	local alive = alive(localplayer);
+	if menu and alive and not bound then
+		cas:BindAction("MenuSpaceOverride", onspace, false, Enum.KeyCode.Space);
+		bound = true;
+	elseif (not menu or not alive) and bound then
+		cas:UnbindAction("MenuSpaceOverride");
+		bound = false;
+	end;
+end);
 local isAliveFlag = true;
 local function StartKillLoop(character)
 	local characterRoot = character:WaitForChild("HumanoidRootPart");
@@ -7439,142 +7536,135 @@ local SA_Logic = {
     OldCalculateFire = nil
 }
 
+local function gethitpart(character)
+	local head = character:FindFirstChild("Head");
+	if head then
+		return head;
+	end;
+	local hrp = character:FindFirstChild("Torso");
+	if hrp then
+		return hrp;
+	end;
+end;
+
 do -- Silent Aim
-	setthreadidentity(2)
-	local ActiveCast = require(repstorage.Shared.Vendor.FastCast.ActiveCast)
-	setthreadidentity(7)
+	setthreadidentity(2);
+	local ActiveCast = require(repstorage.Shared.Vendor.FastCast.ActiveCast);
+	setthreadidentity(7);
+	local OldSimulateCast = getupvalue(ActiveCast.new, 6);
+	local OldCalculateFire = modules.Name["RangedWeaponHandler"].calculateFireDirection;
 
-	local cache = {}
-	local chanceCache = {}
-	local currentSilentAimTarget = nil
-	local OldSimulateCast = getupvalue(ActiveCast.new, 6)
-	local OldCalculateFire = modules.Name["RangedWeaponHandler"].calculateFireDirection
+	local myCasts = {};
+	local currentSilentAimTarget = nil;
+
+	local function isMyCast(caster)
+		if not caster or not caster.UserData then return false end;
+		return caster.UserData.player == LocalPlayer or (caster.UserData.tool and caster.UserData.tool.Parent == LocalPlayer.Character);
+	end;
+
 	function newSimulate(...)
-		local args = { ... }
-		local caster = args[1]
+		local caster = ...;
+		if not isMyCast(caster) then
+			return OldSimulateCast(...);
+		end;
+		if not (Classes.SilentAim.Value or getgenv().ragebot) then
+			return OldSimulateCast(...);
+		end;
 
-		pcall(function()
-			local weapon, metadata = framework:GetRanged()
+		local weapon, metadata = framework:GetRanged();
+		if not weapon or not metadata or weapon ~= caster.UserData.tool then
+			return OldSimulateCast(...);
+		end;
 
-			local Chance = framework:Chance(Classes.HitChance.Value)
-			if not Chance then
-				table.insert(chanceCache, caster)
-			end
+		local Chance = framework:Chance(Classes.HitChance.Value);
+		if not Chance then return OldSimulateCast(...) end;
 
-			if
-				not table.find(chanceCache, caster)
-				and Chance
-				and caster
-				and caster.UserData
-				and caster.StateInfo
-				and caster.UserData.tool == weapon
-				and (Classes.SilentAim.Value or getgenv().ragebot)
-				and weapon
-				and metadata
-			then
-				local Player = framework:GetClosestCharacterToOrigin(caster:GetPosition(), 19)
-				if Classes.ClosestType.Value == "Only Redirect To Target" then
-					Player = nil
-					local Characters = framework:GetClosestCharactersToOrigin(caster:GetPosition(), 19)
-					if table.find(Characters, currentSilentAimTarget) then
-						Player = currentSilentAimTarget
-					end
-				end
-				
-				local MouseClosest = framework:GetClosestToMouse(Classes.FOVSize.Value)
+		local target;
+		if Classes.ClosestType.Value == "Only Redirect To Target" then
+			target = currentSilentAimTarget;
+		else
+			target = framework:GetClosestCharacterToOrigin(caster:GetPosition(), 19);
+		end;
 
-				if Player then
-					local Head = gethitpart(Player);
-					local Character = LocalPlayer.Character
-					local HumanoidRootPart = Character and Character:FindFirstChild("HumanoidRootPart")
-					if getgenv().ragebot and Head and HumanoidRootPart then
-						caster.Caster.RayHit:Fire(caster, {
-							Distance = 1,
-							Instance = Head,
-							Material = Enum.Material.SmoothPlastic,
-							Position = Head.Position,
-							Normal = Vector3.yAxis,
-						}, nil, caster.RayInfo.CosmeticBulletObject)
+		if not target then
+			return OldSimulateCast(...);
+		end;
 
-						caster:Terminate()
-					end
-				end
-			end
-		end)
+		local hitPart = gethitpart(target);
+		if not hitPart then return OldSimulateCast(...) end;
 
-		if caster and caster.UserData and caster.StateInfo then
-			return OldSimulateCast(...)
-		end
+		if getgenv().ragebot then
+			local Character = LocalPlayer.Character;
+			local HumanoidRootPart = Character and Character:FindFirstChild("HumanoidRootPart");
+			if HumanoidRootPart then
+				caster.Caster.RayHit:Fire(caster, {
+					Distance = 1,
+					Instance = hitPart,
+					Material = Enum.Material.SmoothPlastic,
+					Position = hitPart.Position,
+					Normal = Vector3.yAxis,
+				}, nil, caster.RayInfo.CosmeticBulletObject);
+				caster:Terminate();
+				return;
+			end;
+		end;
 
-		return
-	end
+		return OldSimulateCast(...);
+	end;
+
 	function newCalculateFire(...)
-		local args = { ... }
-		local target = framework:GetClosestToMouse(Options.FOVSize.Value)
-		local ranged, metadata = framework:GetRanged()
+		local args = { ... };
+		if not Classes.SilentAim.Value then
+			return OldCalculateFire(...);
+		end;
 
-		if
-			Classes.SilentAim.Value
-			and target
-			and ranged
-			and metadata
-			and framework:Chance(Classes.HitChance.Value)
-			and not framework:InMenu(target)
-		then
+		local target = framework:GetClosestToMouse(Classes.FOVSize.Value);
+		if not target or framework:InMenu(target) then
+			return OldCalculateFire(...);
+		end;
 
-			local targetCharacter = target.Character
-			local hitPart
-			if targetCharacter then
-				local preferred = Classes.SilentHitPart.Value
-    			local part = targetCharacter:FindFirstChild(preferred)
-    			if part then
-        			hitPart = part
-    			elseif preferred == "Head" then
-        			hitPart = gethitpart(targetCharacter)
-    			else
-        			hitPart = nil
-    			end
-			end
-			local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
-			if hitPart and humanoid then
-				local cheatedOrigin =
-					metadata:getCheatedBackOriginIfInObject(metadata._mainCasterBehavior.RaycastParams)
-				local projectileSpeed = metadata._itemConfig.speed or 200
-				local projectileGravity = metadata._itemConfig.gravity or Vector3.new(0, 0, 0)
+		local ranged, metadata = framework:GetRanged();
+		if not ranged or not metadata or not framework:Chance(Classes.HitChance.Value) then
+			return OldCalculateFire(...);
+		end;
 
-				if cheatedOrigin and projectileSpeed and projectileGravity then
-					currentSilentAimTarget = target.Character
-					local predictedPos = PredictTargetPosition(cheatedOrigin, {
-						Position = hitPart.Position,
-						Velocity = (Classes.Resolver.Value and humanoid.MoveDirection or hitPart.Velocity),
-					}, projectileSpeed, localplayer:GetNetworkPing() * 1000, projectileGravity)
-					args[1] = CFrame.lookAt(Vector3.new(), (predictedPos - cheatedOrigin).Unit)
-				end
-			end
-		end
+		local hitPart = gethitpart(target.Character);
+		local humanoid = target.Character:FindFirstChildOfClass("Humanoid");
+		if not hitPart or not humanoid then
+			return OldCalculateFire(...);
+		end;
 
-		return OldCalculateFire(unpack(args))
-	end
+		currentSilentAimTarget = target.Character;
 
-	setupvalue(ActiveCast.new, 6, function(...)
-    	local args = {...}
-    	return newSimulate(unpack(args))
-	end)
+		local cheatedOrigin = metadata:getCheatedBackOriginIfInObject(metadata._mainCasterBehavior.RaycastParams);
+		local projectileSpeed = metadata._itemConfig.speed or 200;
+		local projectileGravity = metadata._itemConfig.gravity or Vector3.new(0, 0, 0);
 
-	modules.Name["RangedWeaponHandler"].calculateFireDirection = newCalculateFire
+		if cheatedOrigin and projectileSpeed then
+			local predictedPos = PredictTargetPosition(cheatedOrigin, {
+				Position = hitPart.Position,
+				Velocity = Classes.Resolver.Value and humanoid.MoveDirection or hitPart.Velocity,
+			}, projectileSpeed, localplayer:GetNetworkPing() * 1000, projectileGravity);
 
-	local VisualizerFolder = Instance.new("Folder", game.Workspace.Terrain)
-	VisualizerFolder.Name = "FastCastVisualizationObjects"
+			args[1] = CFrame.lookAt(Vector3.new(), (predictedPos - cheatedOrigin).Unit);
+		end;
+
+		return OldCalculateFire(unpack(args));
+	end;
+
+	setupvalue(ActiveCast.new, 6, newSimulate);
+	modules.Name["RangedWeaponHandler"].calculateFireDirection = newCalculateFire;
+
+	local VisualizerFolder = Instance.new("Folder", game.Workspace.Terrain);
+	VisualizerFolder.Name = "FastCastVisualizationObjects";
 	VisualizerFolder.ChildAdded:Connect(function(child)
-		task.wait()
-		local Debris = game:GetService("Debris")
-		Debris:AddItem(child, 0.7)
-	end)
-	local ragebotactive = true;
+		task.wait();
+		game:GetService("Debris"):AddItem(child, 0.7);
+	end);
 
 	task.spawn(function()
 		while task.wait() do
-			if not ragebotactive then
+			if not Active then
 				break;
 			end;
 
@@ -7592,15 +7682,26 @@ do -- Silent Aim
 				continue;
 			end;
 
-			local forcefield = Character:FindFirstChildOfClass("ForceField");
-			if forcefield and forcefield.Name ~= "ff" then
-				continue;
-			end;
-
 			local ranged, metadata = framework:GetRanged();
 			if not ranged or not metadata then
 				continue;
 			end;
+
+			if metadata._clientAmmoVO.Value <= 0 then
+				LockedTarget = nil;
+				continue;
+			end;
+
+			local cooldown = metadata._itemConfig.cooldown or 0.6;
+			if tick() - (getgenv().lastShotTick or 0) < cooldown then
+				continue;
+			end;
+			
+			local lastKnownAmmo = metadata._clientAmmoVO.Value;
+			if metadata._clientAmmoVO.Value > lastKnownAmmo then
+				getgenv().lastShotTick = 0;
+			end;
+			lastKnownAmmo = metadata._clientAmmoVO.Value;
 
 			local player = LockedTarget or framework:GetClosest2(Classes.RagebotDist.Value);
 
@@ -7610,26 +7711,6 @@ do -- Silent Aim
 			end;
 
 			if not player or not next(player) then
-				continue;
-			end;
-
-			if metadata.canShootBulletssss == nil then
-				metadata.canShootBulletssss = true;
-			end;
-
-			if metadata._clientAmmoVO.Value <= 0 then
-				continue;
-			end;
-
-			if not metadata.canShootBulletssss then
-				if metadata._itemConfig.maxAmmo == 1 then
-					metadata.canShootBulletssss = true;
-				else
-					continue;
-				end;
-			end;
-
-			if not metadata._mainCasterBehavior or not metadata._mainCaster then
 				continue;
 			end;
 
@@ -7649,43 +7730,28 @@ do -- Silent Aim
 				continue;
 			end;
 
-			local hitpart = gethitpart(targetPlayer.Character);
-			if not hitpart or targetPlayer.Character:FindFirstChildOfClass("ForceField") then
+			local hitPart = gethitpart(targetPlayer.Character);
+			if not hitPart or targetPlayer.Character:FindFirstChildOfClass("ForceField") then
 				LockedTarget = nil;
 				continue;
 			end;
 
-			metadata.canShootBulletssss = false;
 			LockedTarget = player;
 
-			local params = metadata._mainCasterBehavior.RaycastParams;
-			local filter = params.FilterDescendantsInstances or {};
-			local newFilter = table.clone(filter);
+			metadata._mainCasterBehavior.RaycastParams.FilterDescendantsInstances = {
+				metadata._mainCasterBehavior.RaycastParams.FilterDescendantsInstances,
+				PlayerCharacters,
+				Map,
+				Workspace.Terrain,
+			};
 
-			if not table.find(newFilter, PlayerCharacters) then
-				table.insert(newFilter, PlayerCharacters);
-			end;
-
-			if not table.find(newFilter, Map) then
-				table.insert(newFilter, Map);
-			end;
-
-			if not table.find(newFilter, workspace.Terrain) then
-				table.insert(newFilter, workspace.Terrain);
-			end;
-
-			params.FilterDescendantsInstances = newFilter;
-
-			local origin = metadata:getCheatedBackOriginIfInObject(params);
+			local origin = metadata:getCheatedBackOriginIfInObject(metadata._mainCasterBehavior.RaycastParams);
 			local projectileSpeed = metadata._itemConfig.speed or 200;
 			local projectileGravity = metadata._itemConfig.gravity or Vector3.new(0, 0, 0);
 
 			local finalPos = PredictTargetPosition(
 				origin,
-				{
-					Position = hitpart.Position,
-					Velocity = hitpart.Velocity,
-				},
+				{ Position = hitPart.Position, Velocity = hitPart.Velocity },
 				projectileSpeed,
 				localplayer:GetNetworkPing() * 1000,
 				projectileGravity
@@ -7695,7 +7761,7 @@ do -- Silent Aim
 			local dir = OldCalculateFire(CF, 0, 0, 5000);
 
 			local fakeBehavior = {
-				RaycastParams = params,
+				RaycastParams = metadata._mainCasterBehavior.RaycastParams,
 				Acceleration = Vector3.new(),
 				MaxDistance = 5000,
 				HighFidelityBehavior = 1,
@@ -7705,95 +7771,74 @@ do -- Silent Aim
 			};
 
 			local template = metadata._cosmeticProjectileTemplate;
-			fakeBehavior.CosmeticBulletProvider = template;
-			fakeBehavior.CosmeticBulletTemplate = nil;
-
-			local cast = metadata._mainCaster:Fire(origin, dir, projectileSpeed, fakeBehavior);
-
-			metadata._cheatId = (metadata._cheatId or 0) + 1;
-
-			cast.UserData = {
-				player = LocalPlayer,
-				tool = ranged,
-				shotId = tostring(metadata._cheatId),
-				origin = origin,
-			};
-
-			network:FireServer(
-				"RangedFire",
-				ranged,
-				origin,
-				{ [tostring(metadata._cheatId)] = dir.Unit },
-				{ [tostring(metadata._cheatId)] = dir },
-				{ [1] = tostring(metadata._cheatId) },
-				nil,
-				Camera.CFrame,
-				Workspace:GetServerTimeNow()
-			);
-
-			metadata._clientAmmoVO.Value -= 1;
-
-			local distance = (origin - hitpart.Position).Magnitude;
-			local timeToHit = distance / projectileSpeed;
-
-			if not (
-				ranged.Name == "Longbow"
-				or ranged.Name == "Crossbow"
-				or ranged.Name == "Heavy Bow"
-			) then
-				task.delay(timeToHit + 0.08, function()
-					if not (cast and cast.UserData and cast.StateInfo and cast.StateInfo.UpdateConnection) then
-						return;
-					end;
-
-					if Classes.ShowLine.Value then
-						local part = Instance.new("Part");
-						part.Anchored = true;
-						part.CanCollide = false;
-						part.Material = Enum.Material.Neon;
-						part.Color = Colors.ShowLine;
-						part.Size = Vector3.new(
-							0.1,
-							0.1,
-							(hitpart.Position - HumanoidRootPart.Position).Magnitude
-						);
-						part.CFrame =
-							CFrame.new(HumanoidRootPart.Position, hitpart.Position)
-							* CFrame.new(0, 0, -part.Size.Z / 2);
-						part.Parent = workspace;
-
-						task.spawn(function()
-							local fadeTime = 2;
-							local steps = 30;
-
-							for i = 1, steps do
-								part.Transparency = i / steps;
-								task.wait(fadeTime / steps);
-							end;
-
-							part:Destroy();
-						end);
-					end;
-
-					metadata._mainCaster.RayHit:Fire(
-						cast,
-						{
-							Distance = 1,
-							Instance = hitpart,
-							Material = Enum.Material.SmoothPlastic,
-							Position = hitpart.Position,
-							Normal = Vector3.yAxis,
-						},
-						nil,
-						cast.RayInfo and cast.RayInfo.CosmeticBulletObject or nil
-					);
-
-					cast:Terminate();
-				end);
+			if typeof(fakeBehavior) == "Instance" then
+				fakeBehavior.CosmeticBulletProvider = nil;
+				fakeBehavior.CosmeticBulletTemplate = template;
+			else
+				fakeBehavior.CosmeticBulletProvider = template;
+				fakeBehavior.CosmeticBulletTemplate = nil;
 			end;
 
-			task.wait(metadata._itemConfig.cooldown);
-			metadata.canShootBulletssss = true;
+			local cast = metadata._mainCaster:Fire(origin, dir, projectileSpeed, fakeBehavior);
+			metadata._cheatId = metadata._cheatId and metadata._cheatId + 1 or 1;
+			cast.UserData = {
+				["player"] = LocalPlayer,
+				["tool"] = ranged,
+				["shotId"] = tostring(metadata._cheatId),
+				["origin"] = origin,
+			};
+
+			network:FireServer("RangedFire", ranged, origin, {
+				[tostring(metadata._cheatId)] = dir.Unit,
+			}, {
+				[tostring(metadata._cheatId)] = dir,
+			}, {
+				[1] = tostring(metadata._cheatId),
+			}, nil, Camera.CFrame, Workspace:GetServerTimeNow());
+
+			metadata._clientAmmoVO.Value = metadata._clientAmmoVO.Value - 1;
+
+			getgenv().lastShotTick = tick();
+
+			local distance = (origin - hitPart.Position).Magnitude;
+			local timeToHit = distance / projectileSpeed;
+
+			if not (ranged.Name == "Longbow" or ranged.Name == "Crossbow" or ranged.Name == "Heavy Bow") then
+				task.delay(timeToHit + 0.08, function()
+					if cast.UserData and cast.StateInfo and cast.StateInfo.UpdateConnection then
+						if Toggles.ShowLine.Value then
+							local part = Instance.new("Part");
+							part.Anchored = true;
+							part.CanCollide = false;
+							part.Material = Enum.Material.Neon;
+							part.Color = Options.linecolor.Value;
+							part.Size = Vector3.new(0.1, 0.1, (hitPart.Position - HumanoidRootPart.Position).Magnitude);
+							part.CFrame = CFrame.new(HumanoidRootPart.Position, hitPart.Position)
+								* CFrame.new(0, 0, -part.Size.Z / 2);
+							part.Transparency = 0;
+							part.Parent = workspace;
+							task.spawn(function()
+								local fadeTime = 2;
+								local steps = 30;
+								for i = 1, steps do
+									part.Transparency = i / steps;
+									task.wait(fadeTime / steps);
+								end;
+								part:Destroy();
+							end);
+						end;
+
+						metadata._mainCaster.RayHit:Fire(cast, {
+							Distance = 1,
+							Instance = hitPart,
+							Material = Enum.Material.SmoothPlastic,
+							Position = hitPart.Position,
+							Normal = Vector3.yAxis,
+						}, nil, cast.RayInfo.CosmeticBulletObject);
+						cast:Terminate();
+					end;
+				end);
+			end;
 		end;
 	end);
 end;
