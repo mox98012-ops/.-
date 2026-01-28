@@ -361,7 +361,7 @@ table.insert(data.Connections, runservice.Heartbeat:Connect(LPH_NO_VIRTUALIZE(fu
     if not (primarypart and primarypart.Parent) then return; end;
     client_cframe = primarypart.CFrame;
     local humanoid = localplayer.Character:WaitForChild("Humanoid");
-    if getgenv().voidenabled and isnetworkowner(primarypart) then
+    if getgenv().voidenabled then
         local target = targetcframe();
         primarypart.CFrame = target;
 		humanoid:ChangeState(Enum.HumanoidStateType.Freefall);
@@ -5996,8 +5996,8 @@ FOVCircles.Fill.Color = Color3.new(1, 1, 1);
 FOVCircles.Silent.Thickness = 1;
 FOVCircles.Aimbot.Thickness = 1;
 FOVCircles.Visuals.Thickness = 1;
-FOVCircles.Outline.Thickness = 0.1;
-FOVCircles.Fill.Thickness = 0;
+FOVCircles.Outline.Thickness = 1;
+FOVCircles.Fill.Thickness = 1;
 
 FOVCircles.Silent.NumSides = 64;
 FOVCircles.Aimbot.NumSides = 64;
