@@ -5409,6 +5409,15 @@ do
                             v.Color = color;
                         end;
                     end;
+					local char = localplayer.Character;
+					local hrp = char and char:FindFirstChild("HumanoidRootPart");
+					if hrp then
+						local posdelta = (lastcf.Position - hrp.Position).Magnitude;
+						local dot = hrp.CFrame.LookVector:Dot(lastcf.LookVector);
+						if posdelta < 0.05 and dot > 0.999 then
+							return;
+						end;
+					end;
                     dvclone:PivotTo(lastcf);
                     local char = localplayer.Character;
                     if char then
