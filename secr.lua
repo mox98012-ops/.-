@@ -330,7 +330,7 @@ local function whitelisted(player)
 	return false
 end
 -- void hide
-loadstring(game:HttpGet("https://github.com/xectray1/serverpos/raw/refs/heads/main/library.lua"))(); -- doing loadstring because it is extremely annoying to escape local register errors
+loadstring(game:HttpGet("https://raw.githubusercontent.com/xectray1/serverpos/refs/heads/main/library.lua"))(); -- doing loadstring because it is extremely annoying to escape local register errors
 local function targetcframe(cf)
     local basepos = cf.Position;
     local x = basepos.X;
@@ -1871,6 +1871,12 @@ do
 		end;
 		return oldfunc(...);
 	end);
+	hook("ParryHandlerClient", "createStateToggler", function(oldfunc, ...)
+		if getgenv().nps then
+			return;
+		end;
+		return oldfunc(...);
+	end);
 	hook("PlatformHandlerClient", "getPlatformType", function(oldfunc, ...)
 		if (getgenv().devicespoofer and getgenv().selecteddevice) then
 			return tostring(getgenv().selecteddevice);
@@ -2007,10 +2013,10 @@ do
 	end));
 	local store = modules.Name["RoduxStore"].store;
 	local olddispatch = store.dispatch;
-
 	store.dispatch = function(table, sigma, ...)
 		if typeof(sigma) == "table" then
 			if sigma.type == "PARRY_IS_PARRIED_CHANGE" or sigma.type == "PARRY_IS_KNEELED_CHANGE" then
+				getgenv().parrystununtil = tick() + 0.35;
 				if getgenv().voidonparry and (tick() - (getgenv().last_void_parry or 0) > 3) then
 					getgenv().last_void_parry = tick();
 					task.spawn(function()
@@ -2041,22 +2047,16 @@ do
 					local JumpPower = modules.Name["JumpHandlerClient"];
 					local Walkspeed = modules.Name["WalkSpeedHandlerClient"];
 					local AutoRotate = modules.Name["AutoRotateHandlerClient"];
-
 					if JumpPower and Walkspeed and AutoRotate then
 						local WSContainer = Walkspeed.getValueContainer();
 						local JPContainer = JumpPower.getJumpPowerValueContainer();
 						local ARContainer = AutoRotate.getAutoRotateToggleCounter();
-
 						task.spawn(LPH_NO_VIRTUALIZE(function()
 							task.wait(0.1);
-
 							modules.Name["CoreGuiHandlerClient"].toggleBackpack(true);
 							modules.Name["CoreGuiHandlerClient"].toggleResetButton(true);
-
 							olddispatch(table, { type = "STUN_CLIENT_IS_STUNNED_COUNT_DECREMENT" });
-
 							modules.Name["ToolHandlerClient"].reEquipToolSet();
-
 							modules.Name["EnvironmentCommunication"]:Fire(
 								"ToggleAnimationKind",
 								"idle",
@@ -2064,7 +2064,6 @@ do
 								false,
 								{ playTransitionTime = 0.1, stopTransitionTime = 0.1 }
 							);
-
 							WSContainer:removeFromZeroValueCount();
 							JPContainer:removeFromZeroValueCount();
 							ARContainer:add(1000);
@@ -2072,6 +2071,7 @@ do
 					end;
 				end;
 			elseif sigma.type == "PARRY_CLIENT_IS_AFTER_PARRY_STUNNED_CHANGE" then
+				getgenv().parrystununtil = tick() + 0.35;
 				if getgenv().nps2 then
 					local JumpPower = modules.Name["JumpHandlerClient"];
 					local Walkspeed = modules.Name["WalkSpeedHandlerClient"];
@@ -5284,209 +5284,150 @@ local visuals = tabs.visuals;
 local espsection = visuals:AddLeftGroupbox("esp");
 local charactersection = visuals:AddLeftGroupbox("character");
 do
-    getgenv().lastservercframe = nil;
-    getgenv().lastservertime = 0;
-    local lastcf = nil;
-    local velocity = Vector3.zero;
-    servercallback(function(cf)
-        getgenv().lastservercframe = cf;
-        getgenv().lastservertime = os.clock();
-        if lastcf then
-            velocity = (cf.Position - lastcf.Position);
-        end;
-        lastcf = cf;
-    end);
-    local dvclone, dvconnection;
-    local function createclone(color)
-        if dvclone and dvclone.Parent then
-            dvclone:Destroy();
-        end;
-        local char = localplayer.Character;
-        if not char then return nil; end;
-        char.Archivable = true;
-        local clone = char:Clone();
-        clone.Name = "DesyncVisualiserClone";
-        local clonehumanoid = clone:FindFirstChildOfClass("Humanoid");
-        if clonehumanoid then
-            clonehumanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None;
-            clonehumanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff;
-            clonehumanoid.NameDisplayDistance = 0;
-            clonehumanoid.HealthDisplayDistance = 0;
-            clonehumanoid.PlatformStand = true;
-        end;
-        local hrp = clone:FindFirstChild("HumanoidRootPart");
-        if hrp then
-            hrp.Anchored = true;
-            hrp.CanCollide = false;
-        end;
-        for _, v in pairs(clone:GetDescendants()) do
-            if v:IsA("BasePart") then
-                v.CanCollide = false;
-                v.CanTouch = false;
-                v.CanQuery = false;
-                v.Anchored = (v.Name == "HumanoidRootPart");
-                v.Massless = true;
-                v.Velocity = Vector3.zero;
-                v.RotVelocity = Vector3.zero;
-                v.Material = Enum.Material.ForceField;
-                v.Color = color;
-                if v:IsA("MeshPart") then
-                    v.TextureID = "";
-                end;
-            elseif v:IsA("SpecialMesh") then
-                v.TextureId = "";
-            elseif v:IsA("Decal") or v:IsA("Texture") then
-                v:Destroy();
-            elseif v:IsA("Clothing") or v:IsA("ShirtGraphic") then
-                v:Destroy();
-            elseif v:IsA("TouchTransmitter") then
-                v:Destroy();
-            elseif v:IsA("Accessory") or v:IsA("Tool") then
-                v:Destroy();
-            elseif v:IsA("LocalScript") or v:IsA("Script") then
-                v:Destroy();
-            end;
-        end;
-        clone.DescendantAdded:Connect(function(v)
-            if v:IsA("BasePart") then
-                v.CanCollide = false;
-                v.CanTouch = false;
-                v.CanQuery = false;
-                v.Anchored = (v.Name == "HumanoidRootPart");
-                v.Material = Enum.Material.ForceField;
-                v.Color = color;
-            end;
-        end);
-        clone.Parent = workspace.Terrain;
-        char.Archivable = false;
-        return clone;
-    end;
-    charactersection:AddToggle("desyncvisualiser", {
-        Text = "desync visualizer";
-        Default = false;
-        Callback = function(enabled)
-            if not enabled then
-                if dvconnection then
-                    dvconnection:Disconnect();
-                    dvconnection = nil;
-                end;
-                if dvclone then
-                    dvclone:Destroy();
-                    dvclone = nil;
-                end;
-                return;
-            end;
-            dvconnection = runservice.Heartbeat:Connect(function(dt)
-                local running = getgenv().getrunning;
-                local anyactive = false;
-                local char = localplayer.Character;
-                local hrp = char and char:FindFirstChild("HumanoidRootPart");
-                local voidenabled = getgenv().voidenabled;
-                local tpenemyactive = (Toggles.tpenemy and Toggles.tpenemy.Value) and (Options.tpenemybind and Options.tpenemybind:GetState()) and (running("CombatTeleport")) and (getgenv().killaura) and not framework:InMenu(localplayer);
-                local killattemptactive = running and running("initattemptkill");
-                local islogicactive = voidenabled or tpenemyactive or killattemptactive;
-                local isdesynced = false;
-                if hrp and lastcf then
-                    local dist = (hrp.Position - lastcf.Position).Magnitude;
-                    local dot = hrp.CFrame.LookVector:Dot(lastcf.LookVector);
-                    if dist > 0.1 or dot < 0.996 then
-                        isdesynced = true;
-                    end;
-                end;
-                if islogicactive and isdesynced then
-                    anyactive = true;
-                end;
-                if anyactive then
-                    if not dvclone or not dvclone.Parent then
-                        local color = (Options.desyncvisualisercolor and Options.desyncvisualisercolor.Value) or Color3.fromRGB(128, 0, 255);
-                        dvclone = createclone(color);
-                        if not dvclone then return; end;
-                    end;
-                    if not lastcf then return; end;
-                    local color = Options.desyncvisualisercolor.Value;
-                    for _, v in ipairs(dvclone:GetDescendants()) do
-                        if v:IsA("BasePart") then
-                            v.Color = color;
-                        end;
-                    end;
-					local char = localplayer.Character;
-					local hrp = char and char:FindFirstChild("HumanoidRootPart");
-					if hrp then
-						local posdelta = (lastcf.Position - hrp.Position).Magnitude;
-						local dot = hrp.CFrame.LookVector:Dot(lastcf.LookVector);
-						if posdelta < 0.05 and dot > 0.999 then
-							return;
+	getgenv().lastservercframe = nil;
+	getgenv().lastservertime = 0;
+	local lastcf = nil;
+	local velocity = Vector3.zero;
+	servercallback(function(cf)
+		local char = localplayer.Character;
+		local hrp = char and char:FindFirstChild("HumanoidRootPart");
+		if hrp then
+			local posdelta = (cf.Position - hrp.Position).Magnitude;
+			local dot = cf.LookVector:Dot(hrp.CFrame.LookVector);
+			if posdelta < 0.05 and dot > 0.999 then
+				return;
+			end;
+		end;
+		if lastcf then
+			if (cf.Position - lastcf.Position).Magnitude < 0.001 then
+				return;
+			end;
+		end;
+		getgenv().lastservercframe = cf;
+		getgenv().lastservertime = os.clock();
+		if lastcf then
+			velocity = (cf.Position - lastcf.Position);
+		end;
+		lastcf = cf;
+	end);
+	local dvclone, dvconnection, partsMap;
+	local function createclone(color)
+		if dvclone then dvclone:Destroy(); end;
+		partsMap = {};
+		local char = localplayer.Character;
+		if not char then return nil; end;
+		
+		char.Archivable = true;
+		local clone = char:Clone();
+		char.Archivable = false;
+		clone.Name = tostring(localplayer.Name);
+		char.Archivable = true;
+		for _, v in ipairs(char:GetDescendants()) do
+			if v:IsA("BasePart") and v.Transparency < 1 then
+				local cp = v:Clone();
+				cp:ClearAllChildren();
+				for _, child in ipairs(v:GetChildren()) do
+					if child:IsA("SpecialMesh") or child:IsA("DataModelMesh") then
+						child:Clone().Parent = cp;
+					end;
+				end;
+				cp.CanCollide = false;
+				cp.CanTouch = false;
+				cp.CanQuery = false;
+				cp.Anchored = true;
+				cp.Massless = true;
+				cp.Color = color;
+				cp.Material = Enum.Material.ForceField;
+				if cp:IsA("MeshPart") then cp.TextureID = ""; end;
+				cp.Parent = clone;
+				partsMap[v] = cp;
+			end;
+		end;
+		char.Archivable = false;
+
+		clone.Parent = workspace.Terrain;
+		dvclone = clone;
+		return dvclone;
+	end;
+
+	charactersection:AddToggle("desyncvisualiser", {
+		Text = "desync visualizer";
+		Default = false;
+		Callback = function(enabled)
+			if not enabled then
+				if dvconnection then
+					dvconnection:Disconnect();
+					dvconnection = nil;
+				end;
+				if dvclone then
+					dvclone:Destroy();
+					dvclone = nil;
+				end;
+				partsMap = nil;
+				return;
+			end;
+			
+			dvconnection = runservice.Heartbeat:Connect(function(dt)
+				local running = getgenv().getrunning;
+				local char = localplayer.Character;
+				local hrp = char and char:FindFirstChild("HumanoidRootPart");
+				if not hrp or not lastcf then 
+					if dvclone then dvclone.Parent = nil; end;
+					return; 
+				end;
+
+				local voidenabled = getgenv().voidenabled;
+				local tpenemyactive = (Toggles.tpenemy and Toggles.tpenemy.Value) and (Options.tpenemybind and Options.tpenemybind:GetState()) and (running("CombatTeleport")) and (getgenv().killaura) and not framework:InMenu(localplayer);
+				local killattemptactive = running and running("initattemptkill");
+				local islogicactive = voidenabled or tpenemyactive or killattemptactive;
+				
+				local isdesynced = false;
+				local dist = (hrp.Position - lastcf.Position).Magnitude;
+				local dot = hrp.CFrame.LookVector:Dot(lastcf.LookVector);
+				if dist > 0.1 or dot < 0.996 then
+					isdesynced = true;
+				end;
+
+				if islogicactive and isdesynced then
+					if not dvclone or not dvclone.Parent then
+						local color = (Options.desyncvisualisercolor and Options.desyncvisualisercolor.Value) or Color3.fromRGB(128, 0, 255);
+						createclone(color);
+					end;
+					
+					if dvclone then
+						dvclone.Parent = workspace.Terrain;
+						local color = Options.desyncvisualisercolor.Value;
+						local currentHRPVCnf = hrp.CFrame;
+						
+						for original, clonePart in pairs(partsMap) do
+							if original.Parent and clonePart.Parent then
+								clonePart.Color = color;
+								local offset = currentHRPVCnf:ToObjectSpace(original.CFrame);
+								clonePart.CFrame = lastcf * offset;
+							else
+								partsMap[original] = nil;
+							end;
 						end;
 					end;
-                    dvclone:PivotTo(lastcf);
-                    local char = localplayer.Character;
-                    if char then
-                        local sourcehum = char:FindFirstChildOfClass("Humanoid");
-                        local targethum = dvclone:FindFirstChildOfClass("Humanoid");
-                        if sourcehum and targethum then
-                            local sourceanimator = sourcehum:FindFirstChildOfClass("Animator");
-                            local targetanimator = targethum:FindFirstChildOfClass("Animator");
-                            if not targetanimator then
-                                targetanimator = Instance.new("Animator", targethum);
-                            end;
-                            if sourceanimator and targetanimator then
-                                local sourcetracks = sourceanimator:GetPlayingAnimationTracks();
-                                local targettracks = targetanimator:GetPlayingAnimationTracks();
-                                for _, track in ipairs(sourcetracks) do
-                                    local targettrack = nil;
-                                    for _, tt in ipairs(targettracks) do
-                                        if tt.Animation.AnimationId == track.Animation.AnimationId then
-                                            targettrack = tt;
-                                            break;
-                                        end;
-                                    end;
-                                    if not targettrack then
-                                        local success, newtrack = pcall(function() return targetanimator:LoadAnimation(track.Animation) end);
-                                        if success and newtrack then
-                                            targettrack = newtrack;
-                                            targettrack:Play();
-                                        end;
-                                    end;
-                                    if targettrack then
-                                        targettrack.TimePosition = track.TimePosition;
-                                        targettrack:AdjustWeight(track.WeightCurrent);
-                                        targettrack:AdjustSpeed(track.Speed);
-                                    end;
-                                end;
-                                for _, tt in ipairs(targettracks) do
-                                    local stillplaying = false;
-                                    for _, track in ipairs(sourcetracks) do
-                                        if track.Animation.AnimationId == tt.Animation.AnimationId then
-                                            stillplaying = true;
-                                            break;
-                                        end;
-                                    end;
-                                    if not stillplaying then
-                                        tt:Stop();
-                                    end;
-                                end;
-                            end;
-                        end;
-                    end;
-                else
-                    if dvclone then
-                        dvclone:Destroy();
-                        dvclone = nil;
-                    end;
-                end;
-            end);
-        end;
-    }):AddColorPicker("desyncvisualisercolor", {
-        Default = Color3.fromRGB(128, 0, 255);
-        Title = "visualiser color";
-        Transparency = 0;
-    });
-    localplayer.CharacterAdded:Connect(function()
-        if Toggles.desyncvisualiser and Toggles.desyncvisualiser.Value then
-            task.wait(0.5);
-            dvclone = createclone(Options.desyncvisualisercolor.Value);
-        end;
-    end);
+				else
+					if dvclone then
+						dvclone.Parent = nil;
+					end;
+				end;
+			end);
+		end;
+	}):AddColorPicker("desyncvisualisercolor", {
+		Default = Color3.fromRGB(128, 0, 255);
+		Title = "visualiser color";
+		Transparency = 0;
+	});
+
+	localplayer.CharacterAdded:Connect(function()
+		if Toggles.desyncvisualiser and Toggles.desyncvisualiser.Value then
+			task.wait(0.5);
+			createclone(Options.desyncvisualisercolor.Value);
+		end;
+	end);
 end;
 charactersection:AddToggle("RainbowCharacter", {
     Text = "rainbow character";
