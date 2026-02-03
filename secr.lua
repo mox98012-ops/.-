@@ -324,7 +324,7 @@ local function whitelisted(player)
 	if table.find(whitelist, player.Name) then
 		return true
 	end
-	if Toggles and Toggles.WhitelistFriends and Toggles.WhitelistFriends.Value then
+	if Toggles and Toggles.WhitelistFriends and Toggles.WhitelistFriends.Value and getgenv().whitelistfriends then
 		return localplayer:IsFriendsWith(player.UserId)
 	end
 	return false
@@ -6390,8 +6390,8 @@ local function InitializeESP() -- ESP/Visuals Scope (fixes register limit)
 		Classes.TracerColor = Options.TracerColor;
 		Classes.TracerMaxDist = Options.TracerMaxDist;
 		Classes.TracerOrigin = Options.TracerOrigin;
-
-
+		Classes.TracerAutoSelect = Toggles.TracerAutoSelect;
+		Classes.TracerAutoSelectDistance = Options.TracerAutoSelectDistance;
 		Classes.TracerLerp = Options.TracerLerp;
 		Classes.Health = Toggles.Health;
 		Classes.HealthColor = Options.HealthColor;
@@ -6926,28 +6926,27 @@ local function InitializeESP() -- ESP/Visuals Scope (fixes register limit)
             elseif getgenv().ragebot and getgenv().ragebot and currentRagebotTarget then
                 closestPlayerToCursor = currentRagebotTarget
             else
-                local mousePos = userinputservice:GetMouseLocation()
-                local closestDistance = math.huge
-                for _, Player in pairs(players:GetPlayers()) do
-                    if Player == localplayer then continue end
-                    if whitelisted(Player) then continue end
-                    local PlayerDrawing = PlayerDrawings[Player]
-                    if not PlayerDrawing then continue end
-                    local RootPart = PlayerDrawing.RootPart
-                    if not Player.Character or not RootPart then continue end
-                    local DistanceFromCharacter = (camera.CFrame.Position - RootPart.Position).Magnitude
-
-                    local Pos, OnScreen = camera:WorldToViewportPoint(RootPart.Position)
-                    if OnScreen then
-                        local screenDistance = (Vector2.new(Pos.X, Pos.Y) - mousePos).Magnitude
-                        if screenDistance < closestDistance then
-                            closestDistance = screenDistance
-                            closestPlayerToCursor = Player
-                        end
-                    end
-                end
-            end
-        end
+				local mousePos = userinputservice:GetMouseLocation()
+				local closestDistance = math.huge
+				for _, Player in pairs(players:GetPlayers()) do
+					if Player == localplayer then continue end
+					local PlayerDrawing = PlayerDrawings[Player]
+					if not PlayerDrawing then continue end
+					local RootPart = PlayerDrawing.RootPart
+					if not Player.Character or not RootPart then continue end
+					local DistanceFromCharacter = (camera.CFrame.Position - RootPart.Position).Magnitude
+					if Classes.ESPMaxDistance.Value < DistanceFromCharacter then continue end
+					local Pos, OnScreen = camera:WorldToViewportPoint(RootPart.Position)
+					if OnScreen then
+						local screenDistance = (Vector2.new(Pos.X, Pos.Y) - mousePos).Magnitude
+						if screenDistance < closestDistance then
+							closestDistance = screenDistance
+							closestPlayerToCursor = Player
+						end
+					end
+				end
+			end
+		end
 
 		for _, Player in pairs(players:GetPlayers()) do
 			local PlayerDrawing = PlayerDrawings[Player]
@@ -7103,7 +7102,7 @@ local function InitializeESP() -- ESP/Visuals Scope (fixes register limit)
 					Name.Visible = true
 				end
 
-                if Classes.Tracer.Value and DistanceFromCharacter <= Classes.TracerMaxDist.Value and not whitelisted(Player) then
+				if Classes.Tracer.Value and DistanceFromCharacter <= Classes.TracerMaxDist.Value and not whitelisted(Player) then
 					if Player ~= closestPlayerToCursor then
 					else
 						local tracer = PlayerDrawing.Tracer
