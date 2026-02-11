@@ -1,3 +1,6 @@
+if (not game:GetService("Players").LocalPlayer) then
+    repeat task.wait() until game:GetService("Players").LocalPlayer;
+end;
 game:GetService("Players").LocalPlayer:WaitForChild("CharacterLoaded");
 game:GetService("Players").LocalPlayer:WaitForChild("DataLoadedClient");
 game:GetService("Players").LocalPlayer:WaitForChild("DataLoaded");
@@ -122,76 +125,9 @@ if not Data then
 end;
 -- variables
 local library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xectray1/linoria-fork/refs/heads/main/linoria.lua"))();
-local savemanager = loadstring(game:HttpGet("https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/refs/heads/main/addons/SaveManager.lua"))();
+local savemanager = loadstring(game:HttpGet("https://raw.githubusercontent.com/xectray1/savemanager/refs/heads/main/linoria.lua"))();
 local thememanager = loadstring(game:HttpGet("https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/refs/heads/main/addons/ThemeManager.lua"))();
-local window = library:CreateWindow({Title = "serenium.hvh - discord.gg/serenium     combat warriors", Center = true, AutoShow = true, TabPadding = 8, MenuFadeTime = 0});
-do
-	local TITLE_STRIPPED = "serenium"
-	local LEFT_PAD       = "               " -- 13 spaces
-	local MID_PAD        = "  "          -- 3 spaces
-	local SERENIUM_TEXT  = "serenium.hvh - discord.gg/serenium"
-	local COMBAT_TEXT    = "combat warriors"
-	local COMBAT_RICH    = '<font color="rgb(255,0,0)">combat warriors</font>'
-	
-	local function applyStaticText(label)
-	    label.RichText = true
-	    label.Text = LEFT_PAD .. SERENIUM_TEXT .. MID_PAD .. COMBAT_RICH
-		if label.TextXAlignment ~= Enum.TextXAlignment.Left then
-			label.TextXAlignment = Enum.TextXAlignment.Left
-		end
-	    local parent = label.Parent
-	    if parent then
-	        local badChild = parent:FindFirstChild("CombatWarriorsWatermark")
-	        if badChild then badChild:Destroy() end
-	    end
-	end
-
-	local function colorTitle(window)
-	    if not window then return false end
-	    local windowInstance = window.Instance or window.Window or window._window
-	    if not windowInstance then
-	        local libraryUI = library.Instance or library._instance
-	        if libraryUI then
-	            windowInstance = libraryUI
-	        end
-	    end
-		
-	    local function isTitleLabel(label)
-	        return label:IsA("TextLabel")
-	            and label.Text
-	            and label.Text:lower():find(TITLE_STRIPPED)
-	    end
-
-	    local candidates
-	    if windowInstance and windowInstance:IsA("Instance") then
-	        candidates = windowInstance:GetDescendants()
-	    else
-	        candidates = game:GetService("CoreGui"):GetDescendants()
-	    end
-
-	    for _, label in ipairs(candidates) do
-	        if isTitleLabel(label) then
-	            applyStaticText(label)
-	            return true
-	        end
-	    end
-
-	    return false
-	end
-
-	task.spawn(function()
-		for i = 1, 30 do
-		    if colorTitle(window) then break end
-		    task.wait(0.1)
-		end
-	end)
-
-	game:GetService("CoreGui").DescendantAdded:Connect(function(descendant)
-	    if descendant:IsA("TextLabel") and descendant.Text and descendant.Text:lower():find(TITLE_STRIPPED) then
-	        applyStaticText(descendant)
-	    end
-	end)
-end;
+local window = library:CreateWindow({Title = "			  serenium.hvh - discord.gg/serenium   <font color=\"#ff0000\">combat warriors</font>", Center = true, AutoShow = true, TabPadding = 8, MenuFadeTime = 0});
 local tabs = {main = window:AddTab('main'), ranged = window:AddTab("ranged"); charactertab = window:AddTab("character"), misc = window:AddTab("misc"), visuals = window:AddTab("visuals"), sniper = window:AddTab("sniper"), settings = window:AddTab("settings")};
 
 -- tabs
@@ -2147,7 +2083,7 @@ main:AddToggle("KillAura", {
     end;
 }):AddKeyPicker("killaurabind", {
 	Text = "kill aura";
-	Default = "";
+	Default = "B";
 	NoUi = true;
     Callback = function()
         UpdateFeature("KillAura", "killaurabind", function(state)
@@ -2183,7 +2119,7 @@ main:AddToggle("tpenemy", {
     end;
 }):AddKeyPicker("tpenemybind", {
 	Text = "strafe enemy";
-	Default = "";
+	Default = "T";
 	NoUi = true;
     Callback = function()
         UpdateFeature("tpenemy", "tpenemybind", function(state)
@@ -2201,7 +2137,7 @@ main:AddToggle("stick", {
 	end;
 }):AddKeyPicker("stickbind", {
 	Text = "stick to enemy";
-	Default = "";
+	Default = "T";
 	NoUi = true;
 	Callback = function()
 		UpdateFeature("stick", "stickbind", function(state)
@@ -2219,7 +2155,7 @@ main:AddToggle("spectateneemy", {
 	end;
 }):AddKeyPicker("spectateneemybind", {
 	Text = "spectate enemy";
-	Default = "";
+	Default = "N";
 	NoUi = true;
 	Callback = function()
 		UpdateFeature("spectateneemy", "spectateneemybind", function(state)
@@ -2256,7 +2192,7 @@ main:AddSlider("predmultiplier", {
     Text = "multiplier",
     Default = 0.15,
     Min = 0,
-    Max = 1,
+    Max = 8,
     Rounding = 2,
     Compact = true,
     Callback = function(Value)
@@ -2794,7 +2730,7 @@ runservice.Heartbeat:Connect(LPH_NO_VIRTUALIZE(function()
         setrunning("CombatTeleport", false)
     end
 
-    if getgenv().spectateneemy and CurrentTarget and not whitelisted(CurrentTarget) and CurrentTarget.Character.Humanoid.Health > 0 and not framework:InMenu(CurrentTarget) then
+    if getgenv().spectateneemy and CurrentTarget and not whitelisted(CurrentTarget) and CurrentTarget:WaitForChild("Character"):WaitForChild("Humanoid").Health > 0 and not framework:InMenu(CurrentTarget) then
         local targetHumanoid = CurrentTarget.Character:FindFirstChildOfClass("Humanoid")
         if targetHumanoid then
             camera.CameraSubject = targetHumanoid
@@ -3072,7 +3008,7 @@ parrysection:AddToggle("swingsound", {
 	end;
 }):AddKeyPicker("swingsoundkey", {
 	Text = "swing sound";
-	Default = "";
+	Default = "MB2";
 	NoUI = true;
 });
 userinputservice.InputBegan:Connect(function(i, gp)
@@ -3304,7 +3240,7 @@ charactertab:AddToggle("fly", {
     end;
 }):AddKeyPicker("flybind", {
     Text = "fly";
-    Default = "";
+    Default = "X";
     Mode = "Toggle";
     Callback = function()
         UpdateFeature("fly", "flybind", function(state)
@@ -3322,7 +3258,7 @@ charactertab:AddToggle("velocity", {
     end
 }):AddKeyPicker("velocitybind", {
     Text = "velocity";
-    Default = "";
+    Default = "C";
     Mode = "Toggle";
     Callback = function()
         UpdateFeature("velocity", "velocitybind", function(state)
@@ -3813,7 +3749,7 @@ exploit1:AddToggle("desync", {
     end;
 }):AddKeyPicker("desyncbind", {
     Text = "desync";
-    Default = "";
+    Default = "F1";
     Mode = "Toggle";
     Callback = function()
         UpdateFeature("desync", "desyncbind", function(state)
@@ -3831,7 +3767,7 @@ exploit1:AddToggle("voidenabled", {
     end
 }):AddKeyPicker("voidenabledkey", {
     Text = "void";
-    Default = "";
+    Default = "Y";
     Mode = "Toggle";
     Callback = function()
         UpdateFeature("voidenabled", "voidenabledkey", function(state)
@@ -3849,7 +3785,7 @@ exploit1:AddToggle("noclip", {
     end;
 }):AddKeyPicker("noclipbind", {
     Text = "noclip";
-    Default = "";
+    Default = "Z";
     Mode = "Toggle";
     Callback = function()
         UpdateFeature("noclip", "noclipbind", function(state)
@@ -3867,7 +3803,7 @@ exploit1:AddToggle("fakeposition", {
     end;
 }):AddKeyPicker("fakeposkey", {
     Text = "fake position";
-    Default = "";
+    Default = "M";
     Mode = "Toggle";
     Callback = function()
         UpdateFeature("fakeposition", "fakeposkey", function(state)
@@ -3944,7 +3880,7 @@ mmisc:AddToggle("Ragebot", {
 	end;
 }):AddKeyPicker("ragebotkey", {
 	Text = "ragebot";
-	Default = "";
+	Default = "H";
 	Callback = function()
 		UpdateFeature("Ragebot", "ragebotkey", function(state)
 			getgenv().ragebot = state;
@@ -3981,7 +3917,7 @@ mmisc:AddToggle("antimod", {
             };
             task.spawn(function()
                 while getgenv().antimod do
-                    if tick() - lastcheck >= 2.5 then
+                    if tick() - lastcheck >= 2 then
                         lastcheck = tick();
                         for _, player in ipairs(players:GetPlayers()) do
                             if player ~= localplayer then
@@ -4571,59 +4507,6 @@ misc1:AddButton("attempt fling", function()
     end;
     fling();
 end);
---[[misc1:AddButton("kill aura", function()
-    local target = SelectedPlayer
-    if not target then return; end;
-    if framework:InMenu(target) then
-        HitDetectionImpl.CreateLog("serenium.hvh Target is in lobby.")
-        return;
-    end;
-
-    local active = true
-    local connections = {}
-    local preKillCFrame = localplayer.Character and localplayer.Character:GetPivot()
-
-    local function stopTargeting()
-        if not active then return; end;
-        active = false;
-        
-        for _, conn in ipairs(connections) do
-            if conn.Connected then
-                conn:Disconnect();
-            end;
-        end;
-
-        getgenv().targeting_player = false
-        StickTarget = nil
-
-        if preKillCFrame then
-            teleport(preKillCFrame)
-        end
-    end
-
-    getgenv().targeting_player = true
-    StickTarget = target
-
-    if target.Character and target.Character:FindFirstChildOfClass("Humanoid") then
-        table.insert(connections, target.Character:FindFirstChildOfClass("Humanoid").Died:Once(stopTargeting))
-    end
-    table.insert(connections, target.CharacterAdded:Connect(stopTargeting))
-    table.insert(connections, game.Players.PlayerRemoving:Connect(function(plr)
-        if plr == target then stopTargeting() end
-    end))
-
-    if localplayer.Character and localplayer.Character:FindFirstChildOfClass("Humanoid") then
-        table.insert(connections, localplayer.Character:FindFirstChildOfClass("Humanoid").Died:Once(stopTargeting))
-    end
-    table.insert(connections, localplayer.CharacterAdded:Connect(stopTargeting))
-
-    table.insert(connections, runservice.Heartbeat:Connect(function()
-        if not active then return; end;
-        if not target or not target.Parent or (target.Character and target.Character:FindFirstChildOfClass("Humanoid") and target.Character:FindFirstChildOfClass("Humanoid").Health <= 0) then
-            stopTargeting();
-        end;
-    end));
-end);]]
 misc1:AddButton("whitelist", function()
     local playername = SelectedPlayer.Name;
     if not table.find(whitelist, playername) then
@@ -4889,15 +4772,19 @@ auto:AddToggle("loopkillall", {
                 end
                 CanKillAll = false
                 CanFireStartFallDamage = false
-                setrunning("initattemptkill", true)
-                killphase = 1
-                task.wait(0.2)
-                killphase = 2
-                task.wait(0.05)
-                setrunning("initattemptkill", false)
-                if voidactive then
-                    setrunning("voidhidelogic", true)
-                end
+				if not getgenv().falldamage and voidactive then
+					setrunning("voidhidelogic", false);
+				end;
+				setrunning("initattemptkill", true);
+				killphase = 1;
+				task.wait(0.2);
+				killphase = 2;
+				task.wait(0.05);
+				setrunning("initattemptkill", false);
+				if voidactive then
+					setrunning("voidhidelogic", true);
+				end;
+				getgenv().falldamage = true;
                 CanKillAll = true
                 CanFireStartFallDamage = true
             else
@@ -8036,92 +7923,14 @@ do -- Silent Aim
     setthreadidentity(2)
     local ActiveCast = require(game:GetService("ReplicatedStorage").Shared.Vendor.FastCast.ActiveCast)
     setthreadidentity(7)
-    local cache = {}
-    local chanceCache = {}
     local currentSilentAimTarget = nil
     local OldSimulateCast = getupvalue(ActiveCast.new, 6)
     local OldCalculateFire = modules.Name["RangedWeaponHandler"].calculateFireDirection
     function newSimulate(...)
-        local args = { ... }
-        local caster = args[1]
-        pcall(function()
-            local weapon, metadata = framework:GetRanged()
-            local Chance = framework:Chance(Classes.HitChance.Value)
-            if not Chance then
-                table.insert(chanceCache, caster)
-            end
-            if
-                not table.find(chanceCache, caster)
-                and Chance
-                and caster
-                and caster.UserData
-                and caster.StateInfo
-                and caster.UserData.tool == weapon
-                and (Classes.SilentAim.Value or getgenv().ragebot)
-                and weapon
-                and metadata
-            then
-                local Player = framework:GetClosestCharacterToOrigin(caster:GetPosition(), 19)
-                if Classes.ClosestType.Value == "Only Redirect To Target" then
-                    Player = nil
-                    local Characters = framework:GetClosestCharactersToOrigin(caster:GetPosition(), 19)
-                    if table.find(Characters, currentSilentAimTarget) then
-                        Player = currentSilentAimTarget
-                    end
-                end
-                if Player then
-                    local Head = gethitpart(Player)
-                    local Character = LocalPlayer.Character
-                    local HumanoidRootPart = Character and Character:FindFirstChild("HumanoidRootPart")
-                    if getgenv().ragebot and Head and HumanoidRootPart then
-                        caster.Caster.RayHit:Fire(caster, {
-                            Distance = 1,
-                            Instance = Head,
-                            Material = Enum.Material.SmoothPlastic,
-                            Position = Head.Position,
-                            Normal = Vector3.yAxis,
-                        }, nil, caster.RayInfo.CosmeticBulletObject)
-                        caster:Terminate()
-                        return
-                    end
-                    if Head and HumanoidRootPart then
-                        local origin = HumanoidRootPart.Position
-                        local direction = (Head.Position - origin).Unit * 1000
-                        local raycastParams = RaycastParams.new()
-                        raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-                        local ignoreList = metadata._mainCasterBehavior.RaycastParams.FilterDescendantsInstances or {}
-                        if typeof(ignoreList) ~= "table" then ignoreList = {ignoreList} end
-                        for _, plr in pairs(game.Players:GetPlayers()) do
-                            if plr.Character and plr.Character ~= Player and not table.find(ignoreList, plr.Character) then
-                                table.insert(ignoreList, plr.Character)
-                            end
-                        end
-                        if not table.find(ignoreList, workspace.Terrain) then
-                            table.insert(ignoreList, workspace.Terrain)
-                        end
-                        raycastParams.FilterDescendantsInstances = ignoreList
-                        local rayResult = workspace:Raycast(origin, direction, raycastParams)
-                        if rayResult and rayResult.Instance:IsDescendantOf(Player.Character) then
-                            caster.Caster.RayHit:Fire(caster, {
-                                Distance = (rayResult.Position - origin).Magnitude,
-                                Instance = rayResult.Instance,
-                                Material = rayResult.Material,
-                                Position = rayResult.Position,
-                                Normal = rayResult.Normal,
-                            }, nil, caster.RayInfo.CosmeticBulletObject)
-                            caster:Terminate()
-                        end
-                    end
-                end
-            end
-        end)
-        if caster and caster.UserData and caster.StateInfo then
-            return OldSimulateCast(...)
-        end
-        return
+        return OldSimulateCast(...)
     end
     function newCalculateFire(...)
-        local args = { ... }
+        local args = {...}
         local target = framework:GetClosestToMouse(Options.FOVSize.Value)
         if getgenv().stick and getgenv().stickTarget then
             target = getgenv().stickTarget
@@ -8137,43 +7946,62 @@ do -- Silent Aim
         then
             local hitPart = target.Character:FindFirstChild(Classes.SilentHitPart.Value)
             local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
+
             if hitPart and humanoid then
-                local cheatedOrigin =
-                    metadata:getCheatedBackOriginIfInObject(metadata._mainCasterBehavior.RaycastParams)
-                local projectileSpeed = metadata._itemConfig.speed or 200
-                local projectileGravity = metadata._itemConfig.gravity or Vector3.new(0, 0, 0)
-                if cheatedOrigin and projectileSpeed and projectileGravity then
+                local cheatedOrigin = metadata:getCheatedBackOriginIfInObject(
+                    metadata._mainCasterBehavior.RaycastParams
+                )
+
+                if cheatedOrigin then
                     currentSilentAimTarget = target.Character
+
                     local aimPos = hitPart.Position
                     if Toggles.SilentAimPrediction and Toggles.SilentAimPrediction.Value then
-                        local predictionAmount = Options.SilentAimPredictionAmount and Options.SilentAimPredictionAmount.Value or 0.13
-                        local targetVelocity = Classes.Resolver.Value and humanoid.MoveDirection or hitPart.Velocity
+                        local predictionAmount =
+                            Options.SilentAimPredictionAmount and Options.SilentAimPredictionAmount.Value or 0.13
+                        local targetVelocity =
+                            Classes.Resolver.Value and humanoid.MoveDirection or hitPart.Velocity
                         aimPos = aimPos + (targetVelocity * predictionAmount)
                     end
                     args[1] = CFrame.lookAt(Vector3.new(), (aimPos - cheatedOrigin).Unit)
-                    local ignoreList = metadata._mainCasterBehavior.RaycastParams.FilterDescendantsInstances or {}
-                    if typeof(ignoreList) ~= "table" then ignoreList = {ignoreList} end
-                    
-                    for _, plr in pairs(game.Players:GetPlayers()) do
-                        if plr.Character and plr.Character ~= target.Character and not table.find(ignoreList, plr.Character) then
-                            table.insert(ignoreList, plr.Character)
+                    local oldParams = metadata._mainCasterBehavior.RaycastParams
+                    local newParams = RaycastParams.new()
+                    newParams.FilterType = Enum.RaycastFilterType.Blacklist
+                    newParams.IgnoreWater = oldParams.IgnoreWater
+
+                    local ignoreList = {}
+                    if oldParams.FilterDescendantsInstances then
+                        for _, v in ipairs(oldParams.FilterDescendantsInstances) do
+                            table.insert(ignoreList, v)
                         end
                     end
+                    for _, plr in pairs(game.Players:GetPlayers()) do
+                        local plrChar = plr.Character
+                        if plrChar and plrChar ~= target.Character then
+                            table.insert(ignoreList, plrChar)
+                        end
+                    end
+
                     if not table.find(ignoreList, workspace.Terrain) then
                         table.insert(ignoreList, workspace.Terrain)
                     end
-                    
-                    metadata._mainCasterBehavior.RaycastParams.FilterDescendantsInstances = ignoreList
+                    newParams.FilterDescendantsInstances = ignoreList
+                    metadata._mainCasterBehavior.RaycastParams = newParams
+					task.defer(function()
+						metadata._mainCasterBehavior.RaycastParams = oldParams;
+					end);
                 end
             end
         end
         return OldCalculateFire(unpack(args))
     end
+
     setupvalue(ActiveCast.new, 6, newcclosure(function(...)
-        local args = {...}
-        return newSimulate(unpack(args))
+        return newSimulate(...)
     end))
+
     modules.Name["RangedWeaponHandler"].calculateFireDirection = newCalculateFire
+
     local VisualizerFolder = Instance.new("Folder", game.Workspace.Terrain)
     VisualizerFolder.Name = "FastCastVisualizationObjects"
     VisualizerFolder.ChildAdded:Connect(function(child)
@@ -8904,3 +8732,22 @@ end
 InitializeCombat()
 
 thememanager:ApplyToTab(tabs.settings);
+if framework:InMenu(localplayer) then
+	repeat task.wait(); until not framework:InMenu(localplayer);
+end;
+task.wait(0.1);
+if not getgenv().falldamage then
+	if voidactive then
+		setrunning("voidhidelogic", false);
+	end;
+    setrunning("initattemptkill", true);
+    killphase = 1;
+    task.wait(0.2);
+    killphase = 2;
+    task.wait(0.05);
+    setrunning("initattemptkill", false);
+    if voidactive then
+		setrunning("voidhidelogic", true);
+    end;
+	getgenv().falldamage = true;
+end;
